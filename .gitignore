@@ -1,0 +1,7 @@
+runs/
+.env
+sonar_detect-1/
+venv/
+yolo11m.pt
+__pycache__/
+*.pyc
