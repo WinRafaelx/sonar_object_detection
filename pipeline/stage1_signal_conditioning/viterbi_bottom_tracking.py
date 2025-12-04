@@ -40,6 +40,16 @@ class ViterbiBottomTracker:
             bottom_line: Array of seabed row indices for each column (ping)
             blind_zone_mask: Binary mask (True = water column, False = seabed region)
         """
+        # Handle 3D arrays (e.g., grayscale with channel dimension)
+        if len(sonar_image.shape) == 3:
+            # Squeeze out single channel dimension
+            sonar_image = sonar_image.squeeze()
+            if len(sonar_image.shape) != 2:
+                raise ValueError(f"Expected 2D image after squeezing, got shape: {sonar_image.shape}")
+        
+        if len(sonar_image.shape) != 2:
+            raise ValueError(f"Expected 2D sonar image, got shape: {sonar_image.shape}")
+        
         height, width = sonar_image.shape
         logger.debug(f"Processing sonar image: {height}x{width}")
         

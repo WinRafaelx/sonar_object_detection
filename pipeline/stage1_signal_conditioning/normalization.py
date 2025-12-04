@@ -71,11 +71,18 @@ class Normalizer:
             image_uint8 = (image * 255).astype(np.uint8)
             
             # Apply CLAHE
-            image_uint8 = exposure.equalize_adapthist(
+            clahe_result = exposure.equalize_adapthist(
                 image_uint8,
                 clip_limit=self.clahe_clip_limit,
                 kernel_size=self.clahe_tile_grid_size
             )
+            
+            # Handle case where equalize_adapthist might return tuple (shouldn't happen, but be safe)
+            if isinstance(clahe_result, tuple):
+                image_uint8 = clahe_result[0]  # Take first element if tuple
+                logger.warning("equalize_adapthist returned tuple, using first element")
+            else:
+                image_uint8 = clahe_result
             
             # Convert back to float [0, 1]
             image = image_uint8.astype(np.float32)

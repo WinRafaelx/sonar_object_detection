@@ -17,7 +17,8 @@ logger = setup_logger(__name__)
 def preprocess_dataset(
     data_yaml_path: str,
     output_dir: str,
-    config_path: str = 'config/pipeline_config.yaml'
+    config_path: str = 'config/pipeline_config.yaml',
+    test_mode: bool = False
 ):
     """
     Preprocess entire dataset using Stage 1 pipeline
@@ -154,43 +155,187 @@ def preprocess_dataset(
             logger.info(f"Copied {len(list(original_label_dir.glob('*.txt')))} label files")
         
         # Process images
-        image_files = list(original_img_dir.glob('*.jpg')) + list(original_img_dir.glob('*.png'))
-        logger.info(f"Found {len(image_files)} images to process")
+        image_files_jpg = list(original_img_dir.glob('*.jpg'))
+        image_files_png = list(original_img_dir.glob('*.png'))
+        image_files = image_files_jpg + image_files_png
+        
+        logger.info(f"Found {len(image_files_jpg)} .jpg files and {len(image_files_png)} .png files")
+        logger.info(f"Total: {len(image_files)} images to process")
+        
+        # Test mode: process only first image
+        if test_mode and len(image_files) > 0:
+            logger.info("TEST MODE: Processing only first image")
+            image_files = image_files[:1]
+        
+        if len(image_files) == 0:
+            logger.error(f"No image files found in {original_img_dir}")
+            logger.error(f"Directory contents: {list(original_img_dir.iterdir())[:10]}")  # Show first 10 items
+            if split in ['train', 'val']:
+                raise FileNotFoundError(
+                    f"No image files found for required split '{split}' in directory: {original_img_dir}"
+                )
+            continue
         
         processed_count = 0
         failed_count = 0
+        first_error = None
+        error_samples = []  # Store first 3 errors for reporting
+        
+        # Process first image with detailed logging to catch issues early
+        if len(image_files) > 0:
+            logger.info(f"Processing first image as test: {image_files[0].name}")
         
         for img_file in tqdm(image_files, desc=f"Processing {split}"):
             try:
                 # Load image
                 image = cv2.imread(str(img_file), cv2.IMREAD_GRAYSCALE)
                 if image is None:
-                    logger.warning(f"Could not load image: {img_file}")
+                    error_msg = f"Could not load image (cv2 returned None): {img_file}"
+                    if failed_count < 3:
+                        error_samples.append(error_msg)
+                    logger.warning(error_msg)
                     failed_count += 1
+                    if first_error is None:
+                        first_error = error_msg
                     continue
                 
+                if image.size == 0:
+                    error_msg = f"Loaded empty image: {img_file}"
+                    if failed_count < 3:
+                        error_samples.append(error_msg)
+                    logger.warning(error_msg)
+                    failed_count += 1
+                    if first_error is None:
+                        first_error = error_msg
+                    continue
+                
+                # Ensure image is 2D (remove channel dimension if present)
+                if len(image.shape) == 3:
+                    # If it's grayscale with channel dimension, squeeze it
+                    if image.shape[2] == 1:
+                        image = image.squeeze(axis=2)
+                    else:
+                        # Convert to grayscale if it's color
+                        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                
                 # Process with Stage 1
-                processed_image, metadata = processor.process(image)
+                try:
+                    # Call process and capture the result
+                    result = processor.process(image, return_intermediates=False)
+                    
+                    # Debug: log what we got
+                    logger.debug(f"processor.process() returned: type={type(result)}, "
+                               f"is_tuple={isinstance(result, tuple)}, "
+                               f"len={len(result) if hasattr(result, '__len__') else 'N/A'}")
+                    
+                    # Ensure we unpack exactly 2 values
+                    if isinstance(result, tuple):
+                        if len(result) == 2:
+                            processed_image, metadata = result
+                        else:
+                            raise ValueError(
+                                f"processor.process() returned tuple with {len(result)} values, expected 2. "
+                                f"Result: {result[:3] if len(result) > 3 else result}"
+                            )
+                    else:
+                        raise ValueError(
+                            f"processor.process() returned non-tuple: type={type(result)}, value={result}"
+                        )
+                except ValueError as e:
+                    # Re-raise ValueError with more context
+                    error_msg = f"Stage 1 processing failed for {img_file.name}: {str(e)}"
+                    if failed_count < 3:
+                        error_samples.append(error_msg)
+                        logger.error(error_msg, exc_info=True)
+                    else:
+                        logger.error(error_msg)
+                    failed_count += 1
+                    if first_error is None:
+                        first_error = error_msg
+                    continue
+                except Exception as e:
+                    error_msg = f"Stage 1 processing failed for {img_file.name}: {type(e).__name__}: {str(e)}"
+                    if failed_count < 3:
+                        error_samples.append(error_msg)
+                        logger.error(error_msg, exc_info=True)
+                    else:
+                        logger.error(error_msg)
+                    failed_count += 1
+                    if first_error is None:
+                        first_error = error_msg
+                    continue
                 
                 # Convert to uint8 for saving
-                processed_uint8 = (processed_image * 255).astype(np.uint8)
+                try:
+                    processed_uint8 = (processed_image * 255).astype(np.uint8)
+                except Exception as e:
+                    error_msg = f"Image conversion failed for {img_file.name}: {str(e)}"
+                    if failed_count < 3:
+                        error_samples.append(error_msg)
+                        logger.error(error_msg, exc_info=True)
+                    failed_count += 1
+                    if first_error is None:
+                        first_error = error_msg
+                    continue
                 
                 # Save preprocessed image
                 output_img_path = output_img_dir / img_file.name
-                cv2.imwrite(str(output_img_path), processed_uint8)
+                try:
+                    success = cv2.imwrite(str(output_img_path), processed_uint8)
+                    if not success:
+                        error_msg = f"Failed to save processed image: {output_img_path}"
+                        if failed_count < 3:
+                            error_samples.append(error_msg)
+                        logger.warning(error_msg)
+                        failed_count += 1
+                        if first_error is None:
+                            first_error = error_msg
+                        continue
+                except Exception as e:
+                    error_msg = f"Exception saving image {img_file.name}: {str(e)}"
+                    if failed_count < 3:
+                        error_samples.append(error_msg)
+                        logger.error(error_msg, exc_info=True)
+                    failed_count += 1
+                    if first_error is None:
+                        first_error = error_msg
+                    continue
                 
                 processed_count += 1
                 
             except Exception as e:
-                logger.error(f"Error processing {img_file}: {e}")
+                error_msg = f"Unexpected error processing {img_file.name}: {str(e)}"
+                if failed_count < 3:
+                    error_samples.append(error_msg)
+                    logger.error(error_msg, exc_info=True)
+                else:
+                    logger.error(error_msg)
                 failed_count += 1
+                if first_error is None:
+                    first_error = error_msg
         
         logger.info(f"{split}: Processed {processed_count}, Failed {failed_count}")
         
         if processed_count == 0:
-            logger.warning(f"No images processed for {split}! Skipping in data.yaml")
+            error_msg = (
+                f"No images processed for {split}! "
+                f"Found {len(image_files)} image files, but all failed to process.\n"
+            )
+            if first_error:
+                error_msg += f"First error encountered: {first_error}\n"
+            if error_samples:
+                error_msg += f"Sample errors (first {len(error_samples)}):\n"
+                for i, err in enumerate(error_samples, 1):
+                    error_msg += f"  {i}. {err}\n"
+            error_msg += "Check logs above for full error details."
+            
+            logger.error(error_msg)
+            print(f"\n{'='*60}")
+            print(f"ERROR: {error_msg}")
+            print(f"{'='*60}\n")
+            
             if split in ['train', 'val']:
-                raise ValueError(f"Failed to process any images for required split: {split}")
+                raise ValueError(error_msg)
             continue
         
         # Update data.yaml paths (relative to the new data.yaml location)
@@ -244,6 +389,8 @@ def main():
                        help='Output directory for preprocessed dataset')
     parser.add_argument('--config', type=str, default='config/pipeline_config.yaml',
                        help='Path to pipeline configuration file')
+    parser.add_argument('--test', action='store_true',
+                       help='Test mode: process only first image from each split')
     
     args = parser.parse_args()
     
@@ -251,7 +398,8 @@ def main():
     new_data_yaml = preprocess_dataset(
         data_yaml_path=args.data,
         output_dir=args.output,
-        config_path=args.config
+        config_path=args.config,
+        test_mode=args.test
     )
     
     logger.info(f"\nNext step: Train model with preprocessed dataset:")

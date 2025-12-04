@@ -96,8 +96,19 @@ class Stage1Processor:
         
         if self.viterbi:
             logger.debug("Running Viterbi bottom tracking...")
-            bottom_line, blind_zone_mask = self.viterbi.detect_bottom_line(sonar_image)
-            altitude = self.viterbi.get_altitude(bottom_line, sonar_image.shape[0])
+            try:
+                viterbi_result = self.viterbi.detect_bottom_line(sonar_image)
+                if isinstance(viterbi_result, tuple) and len(viterbi_result) == 2:
+                    bottom_line, blind_zone_mask = viterbi_result
+                else:
+                    raise ValueError(
+                        f"detect_bottom_line() returned unexpected result: "
+                        f"type={type(viterbi_result)}, length={len(viterbi_result) if hasattr(viterbi_result, '__len__') else 'N/A'}"
+                    )
+                altitude = self.viterbi.get_altitude(bottom_line, sonar_image.shape[0])
+            except Exception as e:
+                logger.error(f"Error in Viterbi bottom tracking: {e}", exc_info=True)
+                raise
         else:
             logger.debug("Viterbi bottom tracking disabled")
         
@@ -131,5 +142,12 @@ class Stage1Processor:
         
         logger.info("Stage 1 processing complete")
         
-        return sonar_image, metadata
+        # Ensure we return exactly 2 values
+        result = (sonar_image, metadata)
+        if not isinstance(result, tuple) or len(result) != 2:
+            raise ValueError(
+                f"Internal error: process() should return 2 values, but got: "
+                f"type={type(result)}, length={len(result) if hasattr(result, '__len__') else 'N/A'}"
+            )
+        return result
 
