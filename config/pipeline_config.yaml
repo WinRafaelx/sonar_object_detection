@@ -1,0 +1,77 @@
+# Pipeline Configuration for Hybrid Acoustic-Vision Sonar Detection
+
+# Stage 1: Signal Conditioning
+stage1:
+  viterbi:
+    enabled: true
+    max_jump: 10  # Maximum vertical jump in pixels between pings
+    intensity_threshold: 0.3  # Minimum intensity for seabed detection
+    
+  wavelet:
+    enabled: true
+    wavelet: 'db4'  # Daubechies wavelet type
+    mode: 'soft'  # Thresholding mode: 'soft' or 'hard'
+    threshold_multiplier: 0.5  # Noise threshold multiplier
+    
+  normalization:
+    enabled: true
+    log_transform: true
+    clahe:
+      enabled: true
+      clip_limit: 2.0
+      tile_grid_size: [8, 8]
+
+# Stage 2: Model Architecture
+stage2:
+  model:
+    base_model: 'yolo11m.pt'  # Base YOLOv11 model
+    input_size: 640
+    p2_detection: true  # Enable P2 detection head
+    
+  spd_conv:
+    enabled: true
+    block_size: 2  # Spatial block size for SPD
+    
+  ema_attention:
+    enabled: true
+    channels: 256  # Number of channels
+    
+  bifpn:
+    enabled: true
+    num_layers: 3  # Number of BiFPN layers
+
+# Stage 3: Training Protocol
+stage3:
+  shape_iou:
+    enabled: true
+    weight: 1.0  # Loss weight
+    
+  nadir_masking:
+    enabled: true
+    mask_loss: true  # Zero out loss in water column
+
+# Stage 4: Inference & Geocoding
+stage4:
+  sahi:
+    enabled: true
+    slice_size: 640
+    overlap_ratio: 0.25
+    
+  wbf:
+    enabled: true
+    iou_threshold: 0.5
+    skip_box_threshold: 0.0001
+    
+  geocoding:
+    enabled: true
+    sonar_range: 50.0  # Maximum sonar range in meters
+    pixel_resolution: 0.1  # Meters per pixel
+
+# General Settings
+general:
+  device: 'cuda'  # 'cuda' or 'cpu'
+  num_workers: 4
+  batch_size: 16
+  epochs: 50
+  save_dir: 'runs/train'
+

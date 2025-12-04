@@ -5,3 +5,13 @@ numpy
 opencv-python
 yolo
 roboflow
+# Stage 1 dependencies
+PyWavelets>=1.4.0
+scikit-image>=0.20.0
+# Stage 4 dependencies
+# Note: SAHI and ensemble-boxes can be added if needed, but we implement our own versions
+# sahi
+# ensemble-boxes
+# Configuration and utilities
+pyyaml>=6.0
+matplotlib>=3.5.0

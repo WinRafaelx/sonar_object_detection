@@ -5,3 +5,9 @@ venv/
 yolo11m.pt
 __pycache__/
 *.pyc
+logs/
+test_output/
+test_output_stage1/
+test_output_stage2/
+test_output_stage3/
+test_output_stage4/
