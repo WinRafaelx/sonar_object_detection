@@ -5,3 +5,4 @@ venv/
 yolo11m.pt
 __pycache__/
 *.pyc
+main.ipynb
