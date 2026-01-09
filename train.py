@@ -2,22 +2,20 @@ import os
 import torch
 import torch.nn as nn
 from ultralytics import YOLO
-from ultralytics.nn.modules import Conv, C3k2
 from roboflow import Roboflow
 
-# --- 1. RESEARCH-BACKED MODULES ---
+# --- 1. GLOBAL REGISTRATION ---
+# These MUST be defined at the top level so they appear in globals()
 
 class SPDConv(nn.Module):
-    """
-    Space-to-Depth Convolution: Replaces strided convs to prevent 
-    information loss in small underwater targets. [cite: 33, 221]
-    """
+    """ Space-to-Depth Convolution: Replaces strided convs to prevent 
+    information loss in small targets. [cite: 33, 221] """
     def __init__(self, inc, ouc, k=1):
         super().__init__()
         self.conv = nn.Conv2d(inc * 4, ouc, k, padding=k//2)
 
     def forward(self, x):
-        # Slice and stack: Eq. 5 in paper [cite: 386]
+        # Slice and stack sub-regions: Eq. 5 in paper [cite: 386]
         x1 = x[..., ::2, ::2]
         x2 = x[..., 1::2, ::2]
         x3 = x[..., ::2, 1::2]
@@ -27,10 +25,8 @@ class SPDConv(nn.Module):
         return self.conv(x)
 
 class CBAM(nn.Module):
-    """
-    Convolutional Block Attention Module: Dual attention (Spatial + Channel)
-    to suppress underwater noise. [cite: 34, 163]
-    """
+    """ Convolutional Block Attention Module: Dual attention (Spatial + Channel) 
+    to focus on salient regions. [cite: 34, 163] """
     def __init__(self, channels, reduction=16):
         super().__init__()
         self.ca = nn.Sequential(
@@ -46,57 +42,52 @@ class CBAM(nn.Module):
         )
 
     def forward(self, x):
-        # Channel Attention [cite: 404]
-        x = x * self.ca(x)
-        # Spatial Attention [cite: 405]
+        x = x * self.ca(x) # Channel Attention [cite: 404]
         avg_out = torch.mean(x, dim=1, keepdim=True)
         max_out, _ = torch.max(x, dim=1, keepdim=True)
         res = torch.cat([avg_out, max_out], dim=1)
-        return x * self.sa(res)
+        return x * self.sa(res) # Spatial Attention [cite: 405]
 
-# --- 2. MODEL DEFINITION (YAML STRING) ---
-
-# We replace standard Conv(stride=2) with SPDConv to preserve features [cite: 93, 268]
-# and inject CBAM into the Backbone and Head[cite: 395].
+# --- 2. YAML ARCHITECTURE ---
 SOCA_YOLO11M_YAML = """
+# SOCA-YOLOv11 Unified Architecture for 4 Classes
+nc: 4  # Correct: 4 types of targets
 backbone:
-  - [-1, 1, Conv, [64, 3, 2]]  # P1/2
-  - [-1, 1, SPDConv, [128]]     # P2/4 (Replaces standard stride-2)
-  - [-1, 3, C3k2, [128, False]]
-  - [-1, 1, SPDConv, [256]]     # P3/8
-  - [-1, 6, C3k2, [256, False]]
-  - [-1, 1, CBAM, [256]]        # Backbone Attention [cite: 395]
-  - [-1, 1, Conv, [512, 3, 2]]  # P4/16
-  - [-1, 6, C3k2, [512, False]]
-  - [-1, 1, Conv, [1024, 3, 2]] # P5/32
-  - [-1, 3, C3k2, [1024, True]]
-  - [-1, 1, SPPF, [1024, 5]]
+  - [-1, 1, Conv, [64, 3, 2]]      # 0 - P1/2
+  - [-1, 1, SPDConv, [128]]         # 1 - P2/4
+  - [-1, 3, C3k2, [128, False]]    # 2
+  - [-1, 1, SPDConv, [256]]         # 3 - P3/8
+  - [-1, 6, C3k2, [256, False]]    # 4 (Target for Neck concat)
+  - [-1, 1, CBAM, [256]]            # 5 - Backbone Attention
+  - [-1, 1, Conv, [512, 3, 2]]      # 6 - P4/16 (Target for Neck concat)
+  - [-1, 6, C3k2, [512, False]]    # 7
+  - [-1, 1, Conv, [1024, 3, 2]]     # 8 - P5/32 (Target for Neck concat)
+  - [-1, 3, C3k2, [1024, True]]    # 9
+  - [-1, 1, SPPF, [1024, 5]]        # 10
 
 head:
-  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
-  - [[-1, 6], 1, Concat, [1]]  # cat backbone P4
-  - [-1, 3, C3k2, [512, False]]
-  - [-1, 1, CBAM, [512]]        # Neck Attention [cite: 415]
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 11
+  - [[-1, 7], 1, Concat, [1]]      # 12 - cat backbone P4
+  - [-1, 3, C3k2, [512, False]]    # 13
+  - [-1, 1, CBAM, [512]]            # 14 - Neck Attention
 
-  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
-  - [[-1, 4], 1, Concat, [1]]  # cat backbone P3
-  - [-1, 3, C3k2, [256, False]]
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 15
+  - [[-1, 4], 1, Concat, [1]]      # 16 - cat backbone P3
+  - [-1, 3, C3k2, [256, False]]    # 17 (P3 Output)
 
-  - [-1, 1, Conv, [256, 3, 2]]
-  - [[-1, 13], 1, Concat, [1]] # cat head P4
-  - [-1, 3, C3k2, [512, False]]
+  - [-1, 1, Conv, [256, 3, 2]]      # 18
+  - [[-1, 14], 1, Concat, [1]]     # 19 - cat head P4
+  - [-1, 3, C3k2, [512, False]]    # 20 (P4 Output)
 
-  - [-1, 1, Conv, [512, 3, 2]]
-  - [[-1, 10], 1, Concat, [1]] # cat head P5
-  - [-1, 3, C3k2, [1024, True]]
+  - [-1, 1, Conv, [512, 3, 2]]      # 21
+  - [[-1, 10], 1, Concat, [1]]     # 22 - cat head P5
+  - [-1, 3, C3k2, [1024, True]]    # 23 (P5 Output)
 
-  - [[16, 19, 22], 1, Detect, [nc]] # Detect (P3, P4, P5)
+  - [[17, 20, 23], 1, Detect, [nc]] # Final Output Layer
 """
 
-# --- 3. MAIN TRAINING FLOW ---
-
 def main():
-    # Write custom YAML to disk
+    # Save the architecture
     with open("soca_yolo11m.yaml", "w") as f:
         f.write(SOCA_YOLO11M_YAML)
 
@@ -107,23 +98,18 @@ def main():
     dataset = version.download("yolov11")
     data_yaml = os.path.join(dataset.location, "data.yaml")
 
-    # Initialize custom model
-    # Note: Since architecture changed, we start from scratch or map weights
+    # The YOLO constructor will now find SPDConv and CBAM in globals()
     model = YOLO("soca_yolo11m.yaml")
 
-    # Train on NVIDIA A40
-    # Higher batch size and imgsz 640 as per paper [cite: 36, 426]
+    # Train on A40
     results = model.train(
         data=data_yaml,
-        imgsz=640,          # Paper uses 640x640 [cite: 426]
-        epochs=100,         # Increased epochs for convergence
-        batch=32,           # A40 has 48GB VRAM, push this high!
-        device=0,           # Force A40 usage
+        imgsz=640,
+        epochs=100,
+        batch=32,
+        device=0,
         project="runs/train",
-        name="yolo11m_soca_unified",
-        optimizer='SGD',    # Paper likely uses SGD for stability [cite: 617]
-        patience=20,
-        verbose=True
+        name="yolo11m_soca_fixed"
     )
 
 if __name__ == '__main__':
