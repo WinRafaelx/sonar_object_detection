@@ -6,3 +6,4 @@ yolo11m.pt
 __pycache__/
 *.pyc
 main.ipynb
+soca_yolo11m.yaml
