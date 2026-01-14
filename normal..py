@@ -24,8 +24,11 @@ def main():
     results = model.train(
         data=data_yaml,
         imgsz=640,
-        epochs=50,
-        batch=16,
+        epochs=1000,
+        patience=50,
+        batch=-1,            # Auto-batch to maximize VRAM utilization
+        overlap_mask=True,   # Helps if objects are close together
+        augment=True,
         project="runs/train",
         name="yolo11m_sonar", 
         verbose=True,
