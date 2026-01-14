@@ -1,6 +1,7 @@
 import os
 from ultralytics import YOLO
 from roboflow import Roboflow
+from constant import batch_size
 
 def main():
     # 1. Roboflow Setup
@@ -26,7 +27,7 @@ def main():
         imgsz=640,
         epochs=1000,
         patience=50,
-        batch=-1,            # Auto-batch to maximize VRAM utilization
+        batch=batch_size,            # Auto-batch to maximize VRAM utilization
         overlap_mask=True,   # Helps if objects are close together
         augment=True,
         project="runs/train",

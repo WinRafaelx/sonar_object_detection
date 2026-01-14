@@ -5,6 +5,7 @@ import pywt
 import torch
 from ultralytics import YOLO
 from roboflow import Roboflow
+from constant import batch_size
 
 def wavelet_preprocess(image_path):
     """
@@ -58,7 +59,7 @@ def main():
         imgsz=640,
         epochs=1000,
         patience=50,
-        batch=-1,
+        batch=batch_size,            # Auto-batch to maximize VRAM utilization
         # 'iou' hyperparameter can be tuned to simulate Shape-IoU behavior 
         # by focusing on box shape/scale during regression [cite: 58, 280]
         optimizer='SGD', # Paper specifically used SGD [cite: 323]

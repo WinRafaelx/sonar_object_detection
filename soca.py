@@ -4,6 +4,7 @@ import torch.nn as nn
 from ultralytics import YOLO
 import ultralytics.nn.tasks as tasks
 from roboflow import Roboflow
+from constant import batch_size
 
 # --- 1. RESEARCH MODULES (FIXED FOR YOLO PARSER) ---
 class SPDConv(nn.Module):
@@ -173,11 +174,9 @@ def main():
     # Determine device
     if torch.cuda.is_available():
         device = 0  # Use first GPU
-        batch_size = 48  # A40 can handle this
         print(f"✓ Training on GPU: {torch.cuda.get_device_name(0)}")
     else:
         device = 'cpu'
-        batch_size = 4  # Much smaller batch for CPU
         print("⚠ Training on CPU - this will be VERY slow!")
         print("  Consider using Google Colab, Kaggle, or a cloud GPU service.")
     
