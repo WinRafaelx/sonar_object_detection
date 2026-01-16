@@ -23,46 +23,41 @@ Upsample = nn.Upsample
 
 # --- 1. Paper Preprocessing: 2D Discrete Wavelet Transform ---
 def apply_wavelet_preprocessing(image_path):
-    """
-    Enhances robustness by gathering energy in low-frequency coefficients 
-    and maintaining high-frequency details via Haar wavelet[cite: 9, 97, 106].
-    """
     img = cv2.imread(image_path)
     if img is None: return
     
-    # Process each channel to avoid gray scale shift [cite: 106]
     channels = cv2.split(img)
-    reconstructed_channels = []
+    processed_channels = []
     
     for ch in channels:
-        # Discrete Wavelet Transform [cite: 97]
         coeffs = pywt.dwt2(ch, 'haar')
         LL, (LH, HL, HH) = coeffs
-        # Reconstruction logic to enhance clarity [cite: 101, 103]
-        res = pywt.idwt2((LL, (LH, HL, HH)), 'haar')
-        reconstructed_channels.append(np.uint8(np.clip(res, 0, 255)))
+        # Normalize LL to 0-255 range instead of reconstructing
+        LL_norm = cv2.normalize(LL, None, 0, 255, cv2.NORM_MINMAX)
+        processed_channels.append(np.uint8(LL_norm))
     
-    cv2.imwrite(image_path, cv2.merge(reconstructed_channels))
+    # LL is half size, so we resize back to original for YOLO compatibility
+    final = cv2.merge(processed_channels)
+    final = cv2.resize(final, (img.shape[1], img.shape[0]))
+    cv2.imwrite(image_path, final)
 
 # --- 2. Custom Modules: EMA & BiFPN ---
-
 class EMA(nn.Module):
-    """ Efficient Multi-Scale Attention [cite: 57, 224, 235] """
     def __init__(self, channels, factor=32):
         super(EMA, self).__init__()
         self.groups = factor
-        self.softmax = nn.Softmax(dim=-1)
         self.conv1x1 = nn.Conv2d(channels // self.groups, channels // self.groups, kernel_size=1)
         self.conv3x3 = nn.Conv2d(channels // self.groups, channels // self.groups, kernel_size=3, padding=1)
-        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.sig = nn.Sigmoid() # Use Sigmoid for attention masks
 
     def forward(self, x):
         b, c, h, w = x.size()
         group_x = x.view(b * self.groups, -1, h, w) 
-        x1 = self.avg_pool(group_x)
+        x1 = nn.AdaptiveAvgPool2d(1)(group_x)
         x1 = self.conv1x1(x1)
         x2 = self.conv3x3(group_x)
-        out = self.softmax(x1 * x2)
+        # Apply Sigmoid mask
+        out = self.sig(x1 * x2)
         return (out * group_x).view(b, c, h, w)
 
 class BiFPN_Concat2(nn.Module):

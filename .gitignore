@@ -7,4 +7,4 @@ __pycache__/
 *.pyc
 main.ipynb
 soca_yolo11m.yaml
-bes_yolo_11_implementation.yaml
+bes_yolo_config.yaml
