@@ -6,3 +6,4 @@ opencv-python
 yolo
 roboflow
 PyWavelets
+albumentations
