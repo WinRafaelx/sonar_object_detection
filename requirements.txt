@@ -7,3 +7,4 @@ yolo
 roboflow
 PyWavelets
 albumentations
+kaggle

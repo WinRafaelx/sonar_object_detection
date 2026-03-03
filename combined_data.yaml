@@ -1,0 +1,14 @@
+names:
+- aircraft
+- fish
+- other
+- shipwreck
+- cylinder
+- manta
+- rectangle
+- triangle
+nc: 8
+path: C:\Users\meow7\Raf_dev\sonar_object_detection\combined_dataset
+test: test/images
+train: train/images
+val: val/images
