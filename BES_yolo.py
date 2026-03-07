@@ -250,23 +250,38 @@ head:
   - [[-1, 10], 1, BiFPN_Concat2, [1024]] # BiFPN Fusion
   - [-1, 3, C2f, [1024]] 
 
-  - [[15, 18, 21], 1, Detect, [nc]] 
+  - [[16, 19, 22], 1, Detect, [nc]] 
 """
 
 def main():
-    rf = Roboflow(api_key=os.getenv("ROBOFLOW_API_KEY"))
-    project = rf.workspace("object-detect-ury2h").project("sonar_detect")
-    original_dataset = project.version(1).download("yolov11")
+    # 1. Load environment variables for Kaggle API
+    from dotenv import load_dotenv
+    load_dotenv()
+    if 'KAGGLE_API_TOKEN' in os.environ and 'KAGGLE_KEY' not in os.environ:
+        os.environ['KAGGLE_KEY'] = os.environ['KAGGLE_API_TOKEN']
 
-    dwt_dataset_loc = setup_dwt_dataset(original_dataset.location)
+    # 2. Download Kaggle Dataset (Match Let_start_train.py)
+    dataset_root = './data/Combined_Dataset'
+    import kaggle
+    kaggle.api.dataset_download_files(
+        'mawins/side-scan-sonar-image-for-object-detection',
+        path='./data',
+        unzip=True
+    )
+    
+    # 3. Apply DWT Preprocessing (Maintain BES logic)
+    dwt_dataset_loc = setup_dwt_dataset(os.path.abspath(dataset_root))
 
+    # 3. Configure Model YAML
     yaml_path = os.path.join(dwt_dataset_loc, "bes_yolo_config.yaml")
     with open(os.path.join(dwt_dataset_loc, "data.yaml"), "r") as f:
-        nc = yaml.safe_load(f)["nc"]
+        config = yaml.safe_load(f)
+        nc = config["nc"]
 
     with open(yaml_path, "w") as f:
         f.write(f"nc: {nc}\n" + BES_YOLO_YAML)
 
+    # 4. Train
     model = YOLO(yaml_path) 
     model.train(
         data=os.path.join(dwt_dataset_loc, "data.yaml"),
@@ -274,12 +289,23 @@ def main():
         epochs=500,
         patience=50,
         batch=16,            
-        optimizer='SGD',     
-        lr0=0.01,            
-        momentum=0.937,      
+        optimizer='AdamW',   # Better for custom attention/BiFPN modules
+        lr0=0.001,          # Standard starting LR for AdamW
+        cos_lr=True,        # Use cosine learning rate scheduler
         warmup_epochs=3,     
+        
+        # Sonar-optimized augmentations (Respecting shadow physics)
+        degrees=10.0,        # Small rotations
+        fliplr=0.5,          # Horizontal flip is fine
+        flipud=0.0,          # Vertical flip disabled (breaks sonar shadow logic)
+        mixup=0.1,           # Helps with noise
+        scale=0.5,           # Multi-scale robust
+        hsv_h=0.0,           # No hue changes (grayscale)
+        hsv_s=0.0,           # No saturation changes
+        hsv_v=0.4,           # Brightness variations are common in sonar
+        
         project="runs/train",
-        name="bes_yolo_11_implementation"
+        name="bes_yolo_11_refined"
     )
 
 if __name__ == "__main__":
