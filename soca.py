@@ -6,6 +6,17 @@ import ultralytics.nn.tasks as tasks
 from roboflow import Roboflow
 from constant import batch_size
 import inspect
+import yaml
+from dotenv import load_dotenv
+
+# 1. Load environment variables BEFORE importing kaggle
+load_dotenv()
+
+# Map KAGGLE_API_TOKEN to KAGGLE_KEY if needed
+if 'KAGGLE_API_TOKEN' in os.environ and 'KAGGLE_KEY' not in os.environ:
+    os.environ['KAGGLE_KEY'] = os.environ['KAGGLE_API_TOKEN']
+
+import kaggle
 
 # --- 1. RESEARCH MODULES ---
 class SPDConv(nn.Module):
@@ -127,6 +138,12 @@ head:
 
 # --- 4. EXECUTION ---
 def main():
+    load_dotenv()
+    
+    # Map KAGGLE_API_TOKEN to KAGGLE_KEY for the kaggle library
+    if 'KAGGLE_API_TOKEN' in os.environ and 'KAGGLE_KEY' not in os.environ:
+        os.environ['KAGGLE_KEY'] = os.environ['KAGGLE_API_TOKEN']
+
     print("="*60)
     print("SYSTEM INFORMATION")
     print("="*60)
@@ -145,13 +162,29 @@ def main():
     with open(yaml_path, "w") as f:
         f.write(SOCA_YOLO11M_YAML)
 
-    # Roboflow Download
-    print("\nDownloading dataset from Roboflow...")
-    rf = Roboflow(api_key=os.getenv("ROBOFLOW_API_KEY"))
-    project = rf.workspace("object-detect-ury2h").project("sonar_detect")
-    dataset = project.version(1).download("yolov11")
-    data_yaml = os.path.join(dataset.location, "data.yaml")
-    print(f"✓ Dataset downloaded to: {dataset.location}\n")
+    # Kaggle Download
+    print("\nDownloading dataset from Kaggle...")
+    dataset_path = './data/Combined_Dataset'
+    kaggle.api.dataset_download_files(
+        'mawins/side-scan-sonar-image-for-object-detection',
+        path='./data',
+        unzip=True
+    )
+    print("✓ Download complete!")
+
+    data_yaml = os.path.join(dataset_path, "data.yaml")
+
+    # --- FIX: Patch the data.yaml with absolute paths ---
+    with open(data_yaml, 'r') as f:
+        yaml_data = yaml.safe_load(f)
+
+    # Tell YOLO exactly where the root folder is
+    yaml_data['path'] = os.path.abspath(dataset_path)
+
+    with open(data_yaml, 'w') as f:
+        yaml.dump(yaml_data, f)
+    
+    print(f"✓ Dataset prepared at: {dataset_path}\n")
 
     # Build Model with Transfer Learning
     print("Building model...")
@@ -177,10 +210,16 @@ def main():
         # --- SONAR-SPECIFIC TWEAKS ---
         rect=True,          # Don't squish long images
         optimizer='AdamW',  # Better for noisy data
-        hsv_h=0.0,          # No fake color changes
-        hsv_s=0.0,          
-        hsv_v=0.0,          
-        fliplr=0.5,         # Flip left/right is still okay
+
+        # Sonar-optimized augmentations (Respecting shadow physics)
+        degrees=10.0,        # Small rotations
+        fliplr=0.5,          # Horizontal flip is fine
+        flipud=0.0,          # Vertical flip disabled (breaks sonar shadow logic)
+        mixup=0.1,           # Helps with noise
+        scale=0.5,           # Multi-scale robust
+        hsv_h=0.0,           # No hue changes (grayscale)
+        hsv_s=0.0,           # No saturation changes
+        hsv_v=0.4,           # Brightness variations are common in sonar
         # -----------------------------
         
         verbose=True,
