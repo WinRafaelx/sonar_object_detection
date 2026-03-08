@@ -201,7 +201,7 @@ def main():
     results = model.train(
         data=data_yaml,
         imgsz=640,
-        epochs=100,
+        epochs=500,
         batch=batch_size,
         device=device,
         project="runs/train",
