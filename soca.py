@@ -166,7 +166,7 @@ def main():
     print("\nDownloading dataset from Kaggle...")
     dataset_path = './data/Combined_Dataset'
     kaggle.api.dataset_download_files(
-        'mawins/side-scan-sonar-image-for-object-detection',
+        'paweekorns/sss-images',
         path='./data',
         unzip=True
     )
