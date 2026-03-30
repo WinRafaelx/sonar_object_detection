@@ -1,3 +1,6 @@
+# Allow trained weights from Stage 2
+!runs/train/stage2_sss_finetune/weights/best.pt
+
 runs/
 .env
 sonar_detect-1/
