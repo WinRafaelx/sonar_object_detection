@@ -6,9 +6,11 @@ runs/
 sonar_detect-1/
 venv/
 yolo11m.pt
+yolo11n.pt
 __pycache__/
 *.pyc
 main.ipynb
 soca_yolo11m.yaml
 bes_yolo_config.yaml
 data/
+GEMINI.md

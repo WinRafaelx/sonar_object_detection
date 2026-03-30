@@ -58,7 +58,6 @@ def patch_data_yaml(yaml_path, dataset_dir):
     data['path'] = os.path.abspath(dataset_dir)
     
     # Ensure train/val/test are relative to that path
-    # URPC2020 usually has 'train/images', 'test/images', etc.
     if 'train' in data and isinstance(data['train'], str):
         if 'train' in data['train']: # If it was an absolute path containing 'train'
              data['train'] = 'train/images'
@@ -70,6 +69,34 @@ def patch_data_yaml(yaml_path, dataset_dir):
     with open(yaml_path, 'w') as f:
         yaml.dump(data, f)
     return os.path.abspath(yaml_path)
+
+def push_model_to_git(file_path):
+    """Adds, commits, and pushes a specific file to Git."""
+    import subprocess
+    
+    try:
+        if not os.path.exists(file_path):
+            print(f"Error: Could not find model file at {file_path}")
+            return
+
+        print(f"\nStaging {file_path}...")
+        subprocess.run(["git", "add", "-f", file_path], check=True)
+        
+        # Also stage .gitignore if it changed
+        subprocess.run(["git", "add", ".gitignore"], check=True)
+        
+        commit_msg = f"Auto-commit: New trained sonar model weights ({os.path.basename(file_path)})"
+        print(f"Committing changes: '{commit_msg}'...")
+        subprocess.run(["git", "commit", "-m", commit_msg, "--allow-empty"], check=True)
+        
+        print("Pushing to remote repository...")
+        subprocess.run(["git", "push"], check=True)
+        print("✓ Successfully pushed model to Git!")
+
+    except subprocess.CalledProcessError as e:
+        print(f"⚠ Git operation failed: {e}")
+    except Exception as e:
+        print(f"⚠ Unexpected error during Git push: {e}")
 
 def main():
     # Directories
@@ -90,12 +117,12 @@ def main():
     # Initialize model with custom YAML
     model_yaml = os.path.join(os.path.dirname(__file__), "yolo11-sonar.yaml")
     model = YOLO(model_yaml)
-    model.load("yolo11n.pt") # Transfer from base YOLO11
+    model.load("yolo11n.pt") 
 
     # Train Stage 1
     model.train(
         data=urpc_yaml_path,
-        epochs=50, # Reduced for pre-training, adjust as needed
+        epochs=50, 
         imgsz=640,
         batch=batch_size,
         device=0 if torch.cuda.is_available() else 'cpu',
@@ -112,7 +139,7 @@ def main():
     # --- STAGE 2: FINE-TUNE ON SSS-IMAGES ---
     print("\n--- STAGE 2: FINE-TUNING ON SSS-IMAGES ---")
     sss_dataset = 'paweekorns/sss-images'
-    sss_dir = os.path.join(base_data_dir, 'SSS_merged') # Based on kaggle files list
+    sss_dir = os.path.join(base_data_dir, 'SSS_merged')
     
     if not os.path.exists(sss_dir):
         print(f"Downloading {sss_dataset}...")
@@ -121,7 +148,6 @@ def main():
     sss_yaml_path = patch_data_yaml(os.path.join(sss_dir, 'data.yaml'), sss_dir)
 
     # Load weights from Stage 1
-    # We use YOLO(weights) to load the model architecture AND weights
     model_stage2 = YOLO(stage1_weights)
 
     # Train Stage 2
@@ -134,12 +160,16 @@ def main():
         project="runs/train",
         name="stage2_sss_finetune",
         optimizer='AdamW',
-        # Augmentations for sonar
         flipud=0.0,
         hsv_h=0.0,
         hsv_s=0.0,
         lr0=0.001
     )
+
+    # --- STAGE 3: AUTO-PUSH TO GIT ---
+    print("\n--- STAGE 3: AUTO-PUSHING MODEL TO GIT ---")
+    sss_weights_path = os.path.abspath("runs/train/stage2_sss_finetune/weights/best.pt")
+    push_model_to_git(sss_weights_path)
 
 if __name__ == "__main__":
     main()
