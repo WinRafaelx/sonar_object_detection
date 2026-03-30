@@ -1,0 +1,36 @@
+# YOLO11-Sonar-Optimized.yaml
+nc: 1 # Change this to your number of classes
+scales:
+  n: [0.50, 0.25, 1024] 
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]]          # 0-P1/2
+  - [-1, 1, SonarSPDConv, [256]]       # 1-P2/4 (Stacked 64*4=256)
+  - [-1, 2, C3k2, [128, False, 0.25]]  # 2
+  - [-1, 1, SonarSPDConv, [512]]       # 3-P3/8 (Stacked 128*4=512)
+  - [-1, 2, C3k2, [256, False, 0.25]]  # 4
+  - [-1, 1, Conv, [512, 3, 2]]         # 5-P4/16
+  - [-1, 2, C3k2, [512, True]]         # 6
+  - [-1, 1, Conv, [1024, 3, 2]]        # 7-P5/32
+  - [-1, 2, C3k2, [1024, True]]        # 8
+  - [-1, 1, SPPF, [1024, 5]]           # 9
+  - [-1, 2, C2PSA, [1024]]             # 10
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 11
+  - [[-1, 6], 1, Concat, [1]]  # 12
+  - [-1, 2, C3k2, [512, False]] # 13
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 14
+  - [[-1, 4], 1, Concat, [1]]  # 15
+  - [-1, 2, C3k2, [256, False]] # 16
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 17
+  - [[-1, 2], 1, Concat, [1]]  # 18-Connecting high-res P2 features
+  - [-1, 2, C3k2, [128, False]] # 19-(P2 feature map)
+
+  - [-1, 1, CoordAtt, [128, 128]] # 20 (inp, oup)
+  
+  # Detect at 4 scales: 160x160 (P2), 80x80 (P3), 40x40 (P4), 20x20 (P5)
+  - [[20, 16, 13, 10], 1, Detect, [nc]] # 21
