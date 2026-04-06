@@ -122,7 +122,7 @@ def main():
     # Train Stage 1
     model.train(
         data=urpc_yaml_path,
-        epochs=50, 
+        epochs=30, 
         imgsz=640,
         batch=batch_size,
         device=0 if torch.cuda.is_available() else 'cpu',
@@ -131,7 +131,7 @@ def main():
         optimizer='AdamW'
     )
     
-    stage1_weights = os.path.abspath("runs/train/stage1_urpc/weights/best.pt")
+    stage1_weights = os.path.abspath("runs/detect/runs/train/stage1_urpc/weights/best.pt")
     if not os.path.exists(stage1_weights):
         print("Error: Stage 1 training failed to produce weights.")
         return
@@ -153,7 +153,7 @@ def main():
     # Train Stage 2
     model_stage2.train(
         data=sss_yaml_path,
-        epochs=100,
+        epochs=30,
         imgsz=640,
         batch=batch_size,
         device=0 if torch.cuda.is_available() else 'cpu',
