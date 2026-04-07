@@ -122,7 +122,7 @@ def main():
     # Train Stage 1
     model.train(
         data=urpc_yaml_path,
-        epochs=30, 
+        epochs=100, 
         imgsz=640,
         batch=batch_size,
         device=0 if torch.cuda.is_available() else 'cpu',
@@ -153,7 +153,7 @@ def main():
     # Train Stage 2
     model_stage2.train(
         data=sss_yaml_path,
-        epochs=30,
+        epochs=100,
         imgsz=640,
         batch=batch_size,
         device=0 if torch.cuda.is_available() else 'cpu',
