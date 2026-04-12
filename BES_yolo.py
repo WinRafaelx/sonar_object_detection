@@ -288,7 +288,7 @@ def main():
     train_args = {
         'data': data_yaml,
         'imgsz': 640,
-        'epochs': 500,
+        'epochs': 2,
         'batch': batch_size,
         'optimizer': 'AdamW',
         'lr0': 0.001,
@@ -329,8 +329,13 @@ def main():
     def get_metrics(results):
         names = results.names
         box = results.box
-        ap50_per_class = box.ap50
-        per_class = {names[i]: ap50_per_class[i] for i in range(len(names))}
+        
+        per_class = {}
+        for i, cls_idx in enumerate(box.ap_class_index):
+            c_idx = int(cls_idx)
+            class_name = names.get(c_idx, str(c_idx))
+            per_class[class_name] = box.ap50[i]
+            
         return {
             "overall": {
                 "mAP50": box.map50,
@@ -356,8 +361,11 @@ def main():
     class_header = f"{'Class Name':<15} | {'Scratch':<15} | {'Pretrained':<15} | {'Diff':<15}"
     print(class_header)
     print("-" * len(class_header))
-    for cls_name in m_scratch["per_class"].keys():
-        s_val, p_val = m_scratch["per_class"][cls_name], m_pretrained["per_class"].get(cls_name, 0)
+    
+    all_classes = set(m_scratch["per_class"].keys()).union(set(m_pretrained["per_class"].keys()))
+    for cls_name in sorted(all_classes):
+        s_val = m_scratch["per_class"].get(cls_name, 0.0)
+        p_val = m_pretrained["per_class"].get(cls_name, 0.0)
         print(f"{cls_name:<15} | {s_val:<15.4f} | {p_val:<15.4f} | {p_val - s_val:<+15.4f}")
 
 if __name__ == "__main__":

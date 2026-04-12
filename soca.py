@@ -210,7 +210,7 @@ def main():
     train_args = {
         'data': data_yaml,
         'imgsz': 640,
-        'epochs': 5,
+        'epochs': 2,
         'batch': batch_size,
         'device': device,
         'project': "runs/train",
@@ -257,10 +257,14 @@ def main():
         """Extracts metrics from a DetMetrics object."""
         names = results.names
         box = results.box
-        ap50_per_class = box.ap50 # List of AP50 for each class
         
-        # Ensure names are mapped correctly to class indices
-        per_class = {names[i]: ap50_per_class[i] for i in range(len(names))}
+        # map AP50 values to their correct class names using ap_class_index
+        # because some classes might be missing from the validation set
+        per_class = {}
+        for i, cls_idx in enumerate(box.ap_class_index):
+            c_idx = int(cls_idx)
+            class_name = names.get(c_idx, str(c_idx))
+            per_class[class_name] = box.ap50[i]
         
         return {
             "overall": {
@@ -300,9 +304,11 @@ def main():
 
     pc_scratch = m_scratch["per_class"]
     pc_pretrained = m_pretrained["per_class"]
-    for cls_name in pc_scratch.keys():
-        s_val = pc_scratch[cls_name]
-        p_val = pc_pretrained.get(cls_name, 0)
+    
+    all_classes = set(pc_scratch.keys()).union(set(pc_pretrained.keys()))
+    for cls_name in sorted(all_classes):
+        s_val = pc_scratch.get(cls_name, 0.0)
+        p_val = pc_pretrained.get(cls_name, 0.0)
         diff = p_val - s_val
         print(f"{cls_name:<15} | {s_val:<15.4f} | {p_val:<15.4f} | {diff:<+15.4f}")
     print(class_separator)
