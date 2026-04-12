@@ -1,5 +1,6 @@
 #!./venv/Scripts/python
 import os
+import sys
 import cv2
 import numpy as np
 import torch
@@ -20,6 +21,7 @@ from ultralytics.nn.modules import *
 from ultralytics.utils.ops import make_divisible
 from ultralytics.utils import LOGGER, colorstr
 import ultralytics.nn.tasks as tasks
+from constant import batch_size
 
 Upsample = nn.Upsample
 
@@ -34,7 +36,7 @@ class SonarDataset(Dataset):
 
     def __getitem__(self, idx):
         path = self.paths[idx]
-        # Read as Grayscale (1-channel). Sonar isn't color! 3x less math instantly.
+        # Read as Grayscale (1-channel). Sonar isn't color!
         img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
         
         # Resize to uniform shape for batching
@@ -49,7 +51,7 @@ def setup_dwt_dataset(src_dir):
     """Max performant GPU-accelerated DWT caching with DataLoader batching."""
     dest_dir = src_dir + "_dwt"
     if os.path.exists(dest_dir):
-        print(f"Skipping DWT, '{dest_dir}' already exists. Big brain caching.")
+        print(f"✓ Skipping DWT, '{dest_dir}' already exists. Big brain caching.")
         return dest_dir
 
     print(f"Applying Batched GPU-accelerated 2D-DWT to {dest_dir}...")
@@ -132,8 +134,6 @@ class BiFPN_Concat2(nn.Module):
         w = F.relu(self.w)
         w = w / (torch.sum(w, dim=0) + self.epsilon)
         x_proj = [proj(feat) for proj, feat in zip(self.projections, x)]
-        
-        # Max performant pure matrix math. Reshape w for 5D stack [N, B, C, H, W]
         return (w.view(-1, 1, 1, 1, 1) * torch.stack(x_proj)).sum(dim=0)
 
 # --- 3. Monkey-patch parse_model ---
@@ -254,59 +254,111 @@ head:
 """
 
 def main():
-    # 1. Load environment variables for Kaggle API
     from dotenv import load_dotenv
     load_dotenv()
     if 'KAGGLE_API_TOKEN' in os.environ and 'KAGGLE_KEY' not in os.environ:
         os.environ['KAGGLE_KEY'] = os.environ['KAGGLE_API_TOKEN']
-
-    # 2. Download Kaggle Dataset (Match Let_start_train.py)
-    dataset_root = './data/Combined_Dataset'
-    import kaggle
-    kaggle.api.dataset_download_files(
-        'paweekorns/sss-images',
-        path='./data',
-        unzip=True
-    )
     
-    # 3. Apply DWT Preprocessing (Maintain BES logic)
-    dwt_dataset_loc = setup_dwt_dataset(os.path.abspath(dataset_root))
+    kaggle_creds_found = ('KAGGLE_USERNAME' in os.environ and 'KAGGLE_KEY' in os.environ) or os.path.exists(os.path.expanduser('~/.kaggle/kaggle.json'))
 
-    # 3. Configure Model YAML
-    yaml_path = os.path.join(dwt_dataset_loc, "bes_yolo_config.yaml")
-    with open(os.path.join(dwt_dataset_loc, "data.yaml"), "r") as f:
+    # Download Kaggle Dataset
+    dataset_root = './data/Combined_Dataset'
+    if not os.path.exists(os.path.join(dataset_root, "data.yaml")):
+        if not kaggle_creds_found:
+            print("⚠ ERROR: Kaggle credentials not found!")
+            sys.exit(1)
+        import kaggle
+        print("Downloading dataset...")
+        kaggle.api.dataset_download_files('paweekorns/sss-images', path='./data', unzip=True)
+    
+    # Apply DWT Preprocessing
+    dwt_dataset_loc = setup_dwt_dataset(os.path.abspath(dataset_root))
+    data_yaml = os.path.join(dwt_dataset_loc, "data.yaml")
+
+    # Configure Model YAML
+    with open(data_yaml, "r") as f:
         config = yaml.safe_load(f)
         nc = config["nc"]
 
+    yaml_path = os.path.join(dwt_dataset_loc, "bes_yolo_config.yaml")
     with open(yaml_path, "w") as f:
         f.write(f"nc: {nc}\n" + BES_YOLO_YAML)
 
-    # 4. Train
-    model = YOLO(yaml_path) 
-    model.train(
-        data=os.path.join(dwt_dataset_loc, "data.yaml"),
-        imgsz=640,
-        epochs=500,
-        patience=50,
-        batch=16,            
-        optimizer='AdamW',   # Better for custom attention/BiFPN modules
-        lr0=0.001,          # Standard starting LR for AdamW
-        cos_lr=True,        # Use cosine learning rate scheduler
-        warmup_epochs=3,     
-        
-        # Sonar-optimized augmentations (Respecting shadow physics)
-        degrees=10.0,        # Small rotations
-        fliplr=0.5,          # Horizontal flip is fine
-        flipud=0.0,          # Vertical flip disabled (breaks sonar shadow logic)
-        mixup=0.1,           # Helps with noise
-        scale=0.5,           # Multi-scale robust
-        hsv_h=0.0,           # No hue changes (grayscale)
-        hsv_s=0.0,           # No saturation changes
-        hsv_v=0.4,           # Brightness variations are common in sonar
-        
-        project="runs/train",
-        name="bes_yolo_11_refined"
-    )
+    # Shared training parameters
+    train_args = {
+        'data': data_yaml,
+        'imgsz': 640,
+        'epochs': 500,
+        'batch': batch_size,
+        'optimizer': 'AdamW',
+        'lr0': 0.001,
+        'cos_lr': True,
+        'warmup_epochs': 3,
+        'patience': 50,
+        'degrees': 10.0,
+        'fliplr': 0.5,
+        'flipud': 0.0,
+        'mixup': 0.1,
+        'scale': 0.5,
+        'hsv_h': 0.0,
+        'hsv_s': 0.0,
+        'hsv_v': 0.4,
+        'project': "runs/train",
+    }
+
+    # --- RUN 1: BARE FROM SCRATCH ---
+    print("\n" + "="*60)
+    print("RUN 1: TRAINING BES-YOLO FROM SCRATCH")
+    print("="*60 + "\n")
+    model_scratch = YOLO(yaml_path)
+    results_scratch = model_scratch.train(name="bes_yolo_scratch", **train_args)
+
+    # --- RUN 2: PRETRAINED MODEL ---
+    print("\n" + "="*60)
+    print("RUN 2: TRAINING BES-YOLO WITH PRETRAINED WEIGHTS")
+    print("="*60 + "\n")
+    # Using yolo11m.pt as the channels (64, 128...) match the Medium scale
+    model_pretrained = YOLO(yaml_path).load("yolo11m.pt")
+    results_pretrained = model_pretrained.train(name="bes_yolo_pretrained", **train_args)
+
+    # --- FINAL COMPARISON ---
+    print("\n" + "="*60)
+    print("FINAL ACCURACY METRIC COMPARISON (BES-YOLO)")
+    print("="*60)
+    
+    def get_metrics(results):
+        names = results.names
+        box = results.box
+        ap50_per_class = box.ap50
+        per_class = {names[i]: ap50_per_class[i] for i in range(len(names))}
+        return {
+            "overall": {
+                "mAP50": box.map50,
+                "mAP50-95": box.map,
+                "Precision": box.mp,
+                "Recall": box.mr
+            },
+            "per_class": per_class
+        }
+
+    m_scratch = get_metrics(results_scratch)
+    m_pretrained = get_metrics(results_pretrained)
+
+    print("\n[ OVERALL METRICS ]")
+    header = f"{'Metric':<15} | {'Scratch':<15} | {'Pretrained':<15} | {'Diff':<15}"
+    print(header)
+    print("-" * len(header))
+    for key in m_scratch["overall"].keys():
+        s_val, p_val = m_scratch["overall"][key], m_pretrained["overall"][key]
+        print(f"{key:<15} | {s_val:<15.4f} | {p_val:<15.4f} | {p_val - s_val:<+15.4f}")
+
+    print("\n[ PER-CLASS mAP50 ]")
+    class_header = f"{'Class Name':<15} | {'Scratch':<15} | {'Pretrained':<15} | {'Diff':<15}"
+    print(class_header)
+    print("-" * len(class_header))
+    for cls_name in m_scratch["per_class"].keys():
+        s_val, p_val = m_scratch["per_class"][cls_name], m_pretrained["per_class"].get(cls_name, 0)
+        print(f"{cls_name:<15} | {s_val:<15.4f} | {p_val:<15.4f} | {p_val - s_val:<+15.4f}")
 
 if __name__ == "__main__":
     main()

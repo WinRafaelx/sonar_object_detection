@@ -117,7 +117,7 @@ def main():
     # Initialize model with custom YAML
     model_yaml = os.path.join(os.path.dirname(__file__), "yolo11-sonar.yaml")
     model = YOLO(model_yaml)
-    model.load("yolo11n.pt") 
+    model.load("yolo11m.pt") 
 
     # Train Stage 1
     model.train(

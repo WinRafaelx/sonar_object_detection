@@ -1,7 +1,7 @@
 # YOLO11-Sonar-Optimized.yaml
 nc: 1 # Change this to your number of classes
 scales:
-  n: [0.50, 0.25, 1024] 
+  m: [0.50, 1.00, 512] 
 
 backbone:
   # [from, repeats, module, args]
