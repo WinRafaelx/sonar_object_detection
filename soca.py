@@ -119,7 +119,7 @@ patch_parse_model()
 
 # --- 3. ARCHITECTURE DEFINITION (SOCA-YOLO11M with SPDConv) ---
 SOCA_YOLO11M_YAML = """
-nc: 4  # Number of sonar object classes
+# nc is injected dynamically in main()
 
 backbone:
   - [-1, 1, Conv, [64, 3, 2]]       # 0 - P1/2 
@@ -166,11 +166,6 @@ def main():
         print("⚠ Training on CPU - this will be VERY slow!")
     print("="*60 + "\n")
     
-    # Save Custom YAML
-    yaml_path = "soca_yolo11m.yaml"
-    with open(yaml_path, "w") as f:
-        f.write(SOCA_YOLO11M_YAML)
-
     # Kaggle Download
     dataset_path = './data/Combined_Dataset'
     if not os.path.exists(os.path.join(dataset_path, "data.yaml")):
@@ -197,11 +192,19 @@ def main():
     # Patch the data.yaml with absolute paths to ensure YOLO finds the images
     with open(data_yaml, 'r') as f:
         yaml_data = yaml.safe_load(f)
+    
+    nc = yaml_data.get("nc", 4) # Extract nc from dataset
     yaml_data['path'] = os.path.abspath(dataset_path)
+    
     with open(data_yaml, 'w') as f:
         yaml.dump(yaml_data, f)
     
-    print(f"✓ Dataset prepared at: {dataset_path}\n")
+    # Save Custom Model YAML with dynamic nc
+    yaml_path = "soca_yolo11m.yaml"
+    with open(yaml_path, "w") as f:
+        f.write(f"nc: {nc}\n" + SOCA_YOLO11M_YAML)
+    
+    print(f"✓ Dataset prepared at: {dataset_path} with nc={nc}\n")
 
     # Shared training parameters
     train_args = {
