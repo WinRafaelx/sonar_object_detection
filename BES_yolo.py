@@ -262,25 +262,41 @@ def main():
     kaggle_creds_found = ('KAGGLE_USERNAME' in os.environ and 'KAGGLE_KEY' in os.environ) or os.path.exists(os.path.expanduser('~/.kaggle/kaggle.json'))
 
     # Download Kaggle Dataset
-    dataset_root = './data/Combined_Dataset'
-    if not os.path.exists(os.path.join(dataset_root, "data.yaml")):
+    dataset_path = './data/Combined_Dataset'
+    if not os.path.exists(os.path.join(dataset_path, "data.yaml")):
         if not kaggle_creds_found:
-            print("⚠ ERROR: Kaggle credentials not found!")
+            print("⚠ ERROR: Kaggle credentials not found! Place 'kaggle.json' in ~/.kaggle/ or set KAGGLE_USERNAME and KAGGLE_KEY.")
             sys.exit(1)
+        
         import kaggle
-        print("Downloading dataset...")
-        kaggle.api.dataset_download_files('paweekorns/sss-images', path='./data', unzip=True)
+        print("\nDownloading dataset from Kaggle...")
+        try:
+            kaggle.api.dataset_download_files(
+                'paweekorns/sss-images',
+                path='./data',
+                unzip=True
+            )
+            print("✓ Download complete!")
+        except Exception as e:
+            print(f"⚠ Kaggle download failed: {e}")
+            sys.exit(1)
+    else:
+        print("✓ Dataset found locally, skipping download.")
+
+    data_yaml = os.path.join(dataset_path, "data.yaml")
+
+    # Patch the data.yaml with absolute paths to ensure YOLO finds the images
+    with open(data_yaml, 'r') as f:
+        yaml_data = yaml.safe_load(f)
     
-    # Apply DWT Preprocessing
-    dwt_dataset_loc = setup_dwt_dataset(os.path.abspath(dataset_root))
-    data_yaml = os.path.join(dwt_dataset_loc, "data.yaml")
-
+    nc = yaml_data.get("nc", 4) # Extract nc from dataset
+    yaml_data['path'] = os.path.abspath(dataset_path)
+    
+    with open(data_yaml, 'w') as f:
+        yaml.dump(yaml_data, f)
+    
     # Configure Model YAML
-    with open(data_yaml, "r") as f:
-        config = yaml.safe_load(f)
-        nc = config["nc"]
-
-    yaml_path = os.path.join(dwt_dataset_loc, "bes_yolo_config.yaml")
+    yaml_path = "bes_yolo_config.yaml"
     with open(yaml_path, "w") as f:
         f.write(f"nc: {nc}\n" + BES_YOLO_YAML)
 

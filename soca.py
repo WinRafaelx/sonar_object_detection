@@ -30,7 +30,9 @@ class SPDConv(nn.Module):
     def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, act=True):
         super().__init__()
         # c1*4 because the forward pass stacks 4 sub-regions into the channel dimension
-        self.conv = nn.Conv2d(c1 * 4, c2, k, padding=k//2)
+        self.conv = nn.Conv2d(c1 * 4, c2, k, padding=k//2, bias=False)
+        self.bn = nn.BatchNorm2d(c2)
+        self.act = nn.SiLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
 
     def forward(self, x):
         # Slice and stack sub-regions (Space-to-Depth)
@@ -39,7 +41,7 @@ class SPDConv(nn.Module):
         x3 = x[..., ::2, 1::2]
         x4 = x[..., 1::2, 1::2]
         x = torch.cat([x1, x2, x3, x4], dim=1)
-        return self.conv(x)
+        return self.act(self.bn(self.conv(x)))
 
 class CBAM(nn.Module):
     """
@@ -61,10 +63,12 @@ class CBAM(nn.Module):
         # Spatial Attention
         self.sa = nn.Sequential(
             nn.Conv2d(2, 1, 7, padding=3, bias=False),
+            nn.BatchNorm2d(1),
             nn.Sigmoid()
         )
         
-        self.proj = nn.Conv2d(c1, c2, 1) if c1 != c2 else nn.Identity()
+        self.proj = nn.Conv2d(c1, c2, 1, bias=False) if c1 != c2 else nn.Identity()
+        self.bn = nn.BatchNorm2d(c2) if c1 != c2 else nn.Identity()
 
     def forward(self, x):
         x = x * self.ca(x)
@@ -72,6 +76,8 @@ class CBAM(nn.Module):
         max_out, _ = torch.max(x, dim=1, keepdim=True)
         res = torch.cat([avg_out, max_out], dim=1)
         x = x * self.sa(res)
+        if isinstance(self.proj, nn.Conv2d):
+            return self.bn(self.proj(x))
         return self.proj(x)
 
 # --- 2. GLOBAL REGISTRATION & MONKEY-PATCHING ---
@@ -120,6 +126,9 @@ patch_parse_model()
 # --- 3. ARCHITECTURE DEFINITION (SOCA-YOLO11M with SPDConv) ---
 SOCA_YOLO11M_YAML = """
 # nc is injected dynamically in main()
+
+scales:
+  m: [0.50, 1.00, 512] # YOLO11m scale
 
 backbone:
   - [-1, 1, Conv, [64, 3, 2]]       # 0 - P1/2 
@@ -231,6 +240,7 @@ def main():
         'save_period': 10,
         'cache': False,
         'workers': 8 if device != 'cpu' else 2,
+        'amp': False, # Disable AMP to prevent NaN/Inf during training
     }
 
     # --- RUN 1: BARE FROM SCRATCH ---
