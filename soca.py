@@ -210,7 +210,7 @@ def main():
     train_args = {
         'data': data_yaml,
         'imgsz': 640,
-        'epochs': 2,
+        'epochs': 500,
         'batch': batch_size,
         'device': device,
         'project': "runs/train",

@@ -288,7 +288,7 @@ def main():
     train_args = {
         'data': data_yaml,
         'imgsz': 640,
-        'epochs': 2,
+        'epochs': 500,
         'batch': batch_size,
         'optimizer': 'AdamW',
         'lr0': 0.001,
