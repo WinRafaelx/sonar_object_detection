@@ -41,7 +41,7 @@ model = YOLO("yolo11m.pt")
 results = model.train(
     data=data_yaml_path,
     imgsz=640,
-    epochs=500,
+    epochs=100,
     patience=50,
     batch=batch_size,
     project="runs/train",
@@ -53,6 +53,7 @@ results = model.train(
     fliplr=0.5,        # Flip horizontal 50% of the time
     mixup=0.1,         # Mixup (blend 2 images) 10% chance
     scale=0.5,         # Zoom in/out by +/- 50%
+    mosaic=0.0
 
     # Turn off unrelated augs
     flipud=0.0,        # Don't flip upside down (violates shadow physics)
