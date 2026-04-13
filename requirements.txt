@@ -9,3 +9,6 @@ PyWavelets
 albumentations
 kaggle
 pytorch_wavelets
+pandas
+python-dotenv
+PyYAML

@@ -8,7 +8,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from ultralytics import YOLO
 import ultralytics.nn.tasks as tasks
-from constant import batch_size
+from constant import batch_size as default_batch_size
 import argparse
 
 # Import custom modules
@@ -74,7 +74,9 @@ def get_metrics(results):
     }
 
 # --- 4. MAIN EXPERIMENTATION ENGINE ---
-def run_experiment(mode, epochs=100, use_dwt=False):
+def run_experiment(args):
+    mode = args.mode
+    use_dwt = args.dwt
     print(f"\n{'='*20} STARTING EXPERIMENT: {mode.upper()} {' (DWT=' + str(use_dwt) + ')'} {'='*20}")
     
     # Load hyperparams
@@ -97,7 +99,7 @@ def run_experiment(mode, epochs=100, use_dwt=False):
     
     # Architecture & Weights Setup
     model_yaml_path = f"tmp_{mode}.yaml"
-    pretrained_weights = "yolo11m.pt"
+    pretrained_weights = "yolo11n.pt"
     
     with open(sss_yaml, 'r') as f:
         nc = yaml.safe_load(f)['nc']
@@ -112,34 +114,18 @@ def run_experiment(mode, epochs=100, use_dwt=False):
         with open(model_yaml_path, "w") as f:
             f.write(f"nc: {nc}\n" + ATTN_SPDCONV_YOLO_YAML)
         model = YOLO(model_yaml_path).load(pretrained_weights)
-    elif mode == "full_staged":
-        # Stage 1: Pre-train on URPC2020
-        print("\n--- STAGE 1: Pre-training on URPC2020 ---")
-        urpc_dir = os.path.join(base_data_dir, 'URPC2020')
-        if not os.path.exists(urpc_dir):
-            kaggle.api.dataset_download_files('lywang777/urpc2020', path=base_data_dir, unzip=True)
-        urpc_yaml = patch_data_yaml(os.path.join(urpc_dir, 'data.yaml'), urpc_dir)
-        
-        with open(model_yaml_path, "w") as f:
-            f.write(f"nc: {yaml.safe_load(open(urpc_yaml))['nc']}\n" + ATTN_SPDCONV_YOLO_YAML)
-        
-        stage1_model = YOLO(model_yaml_path).load(pretrained_weights)
-        stage1_model.train(data=urpc_yaml, epochs=50, batch=batch_size, imgsz=640, name=f"stage1_{mode}")
-        
-        # Stage 2: Fine-tune on SSS
-        print("\n--- STAGE 2: Fine-tuning on SSS ---")
-        stage1_weights = f"runs/detect/stage1_{mode}/weights/best.pt"
-        model = YOLO(stage1_weights)
     else:
         raise ValueError("Invalid mode")
 
     # Training
     results = model.train(
         data=sss_yaml,
-        imgsz=640,
-        epochs=epochs,
-        patience=50,
-        batch=batch_size,
+        imgsz=args.imgsz,
+        epochs=args.epochs,
+        patience=args.patience,
+        batch=args.batch,
+        optimizer=args.optimizer,
+        device=args.device,
         project="runs/experiments",
         name=f"exp_{mode}_{'dwt' if use_dwt else 'normal'}",
         verbose=True,
@@ -152,13 +138,25 @@ def run_experiment(mode, epochs=100, use_dwt=False):
     return metrics
 
 if __name__ == "__main__":
+    # Determine the most sensible default device
+    default_device = "0" if torch.cuda.is_available() else "cpu"
+    
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, default="standard", choices=["standard", "spdconv", "hybrid", "full_staged"])
-    parser.add_argument("--epochs", type=int, default=100)
+    # High-level Experiment Config
+    parser.add_argument("--mode", type=str, default="standard", choices=["standard", "spdconv", "hybrid"])
     parser.add_argument("--dwt", action="store_true", help="Use DWT preprocessed dataset")
+    
+    # Training Parameters
+    parser.add_argument("--epochs", type=int, default=100, help="Total number of training epochs")
+    parser.add_argument("--batch", type=int, default=default_batch_size, help="Batch size for training")
+    parser.add_argument("--imgsz", type=int, default=640, help="Input image size")
+    parser.add_argument("--patience", type=int, default=50, help="Early stopping patience")
+    parser.add_argument("--optimizer", type=str, default="AdamW", help="Optimizer to use (SGD, Adam, AdamW, etc.)")
+    parser.add_argument("--device", type=str, default=default_device, help="CUDA device index (e.g. 0) or 'cpu'")
+    
     args = parser.parse_args()
 
-    metrics = run_experiment(args.mode, args.epochs, args.dwt)
+    metrics = run_experiment(args)
     
     # Save results summary
     summary_file = "experiment_results.csv"
