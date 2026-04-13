@@ -36,6 +36,10 @@ yaml_data['path'] = os.path.abspath(dataset_path)
 with open(data_yaml_path, 'w') as f:
     yaml.dump(yaml_data, f)
 
+# --- Load best hyperparameters ---
+with open('best_hyperparameters.yaml', 'r') as f:
+    best_hyp = yaml.safe_load(f)
+
 model = YOLO("yolo11m.pt")
 
 results = model.train(
@@ -48,16 +52,5 @@ results = model.train(
     name="yolo11m_sonar", 
     verbose=True,
     plots=True,
-
-    degrees=10.0,      # Rotate image +/- 10 degrees randomly
-    fliplr=0.5,        # Flip horizontal 50% of the time
-    mixup=0.1,         # Mixup (blend 2 images) 10% chance
-    scale=0.5,         # Zoom in/out by +/- 50%
-    mosaic=0.0,
-
-    # Turn off unrelated augs
-    flipud=0.0,        # Don't flip upside down (violates shadow physics)
-    hsv_h=0.0,         # Don't change Hue (it's grayscale anyway)
-    hsv_s=0.0,         # Don't change Saturation
-    hsv_v=0.4          # Random brightness (Value) changes are okay
+    **best_hyp
 )
