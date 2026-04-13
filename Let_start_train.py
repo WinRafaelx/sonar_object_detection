@@ -15,9 +15,9 @@ from ultralytics import YOLO
 from constant import batch_size
 
 # Download your dataset
-dataset_path = './data/Combined_Dataset'
+dataset_path = './data/sampled_yolo_dataset'
 kaggle.api.dataset_download_files(
-    'paweekorns/sss-images',
+    'mawins/sample-sss-img',
     path='./data',
     unzip=True
 )
