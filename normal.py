@@ -15,6 +15,7 @@ import argparse
 from custom_modules import SonarSPDConv, CoordAtt, CBAM, EMA, BiFPN_Concat2
 from architecture_configs import SPDCONV_YOLO_YAML, ATTN_SPDCONV_YOLO_YAML
 from preprocess_dwt import setup_dwt_dataset
+from preprocess_sonar import setup_sonar_augmented_dataset
 
 # 1. LOAD ENV & KAGGLE AUTH
 load_dotenv()
@@ -117,6 +118,8 @@ def run_experiment(args):
     # Apply DWT if requested
     if use_dwt:
         sss_dir = setup_dwt_dataset(sss_dir)
+    elif args.sonar_aug:
+        sss_dir = setup_sonar_augmented_dataset(sss_dir)
 
     sss_yaml = patch_data_yaml(os.path.join(sss_dir, 'data.yaml'), sss_dir)
     
@@ -150,7 +153,7 @@ def run_experiment(args):
         optimizer=args.optimizer,
         device=args.device,
         project="runs/experiments",
-        name=f"exp_{mode}_{'dwt' if use_dwt else 'normal'}",
+        name=f"exp_{mode}_{'dwt' if use_dwt else ('sonar_aug' if args.sonar_aug else 'normal')}",
         verbose=True,
         **best_hyp
     )
@@ -158,6 +161,7 @@ def run_experiment(args):
     metrics = get_metrics(results)
     metrics["mode"] = mode
     metrics["use_dwt"] = use_dwt
+    metrics["sonar_aug"] = args.sonar_aug
     return metrics
 
 if __name__ == "__main__":
@@ -168,6 +172,7 @@ if __name__ == "__main__":
     # High-level Experiment Config
     parser.add_argument("--mode", type=str, default="standard", choices=["standard", "spdconv", "hybrid"])
     parser.add_argument("--dwt", action="store_true", help="Use DWT preprocessed dataset")
+    parser.add_argument("--sonar_aug", action="store_true", help="Use Sonar-Augmented (Speckle/Shadows) dataset")
     
     # Training Parameters
     parser.add_argument("--epochs", type=int, default=100, help="Total number of training epochs")

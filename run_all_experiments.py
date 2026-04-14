@@ -4,26 +4,27 @@ import os
 import pandas as pd
 import time
 
-# List of experiments to run: (mode, use_dwt)
+# List of experiments to run: (mode, use_dwt, use_sonar_aug)
 EXPERIMENTS = [
-    # ("standard", False),      # Completed
-    # ("spdconv", False),       # Completed
-    ("hybrid", False),        # Full Architecture (SPDConv + Attention + BiFPN) - FAILED/SKIPPED
-    # ("standard", True),       # Completed
-    ("hybrid", True),         # Full Architecture + DWT (The "Ultimate" model) - FAILED/SKIPPED
+    ("hybrid", False, True),  # Full Architecture + Sonar Augmentation (Speckle/Shadows)
 ]
 
-# You can reduce this for a "quick check" or keep at 100+ for final results
+# Standard epochs for most runs
 EPOCHS = 100
+# High-intensity training for the final model
+ULTIMATE_EPOCHS = 300
 
-def run_cmd(mode, use_dwt):
+def run_cmd(mode, use_dwt, use_sonar_aug):
+    epochs = ULTIMATE_EPOCHS if use_sonar_aug else EPOCHS
     cmd = [
         sys.executable, "normal.py",
         "--mode", mode,
-        "--epochs", str(EPOCHS)
+        "--epochs", str(epochs)
     ]
     if use_dwt:
         cmd.append("--dwt")
+    if use_sonar_aug:
+        cmd.append("--sonar_aug")
     
     print(f"\n>>> RUNNING: {' '.join(cmd)}")
     start_time = time.time()
@@ -32,20 +33,19 @@ def run_cmd(mode, use_dwt):
         # We use subprocess.run to ensure each training session starts with a fresh memory/CUDA state
         subprocess.run(cmd, check=True)
         duration = (time.time() - start_time) / 60
-        print(f">>> SUCCESS: {mode} (DWT={use_dwt}) completed in {duration:.2f} minutes.")
+        print(f">>> SUCCESS: {mode} (DWT={use_dwt}, SonarAug={use_sonar_aug}) completed in {duration:.2f} minutes.")
     except subprocess.CalledProcessError as e:
-        print(f">>> ERROR: Experiment {mode} (DWT={use_dwt}) failed with error: {e}")
+        print(f">>> ERROR: Experiment {mode} (DWT={use_dwt}, SonarAug={use_sonar_aug}) failed with error: {e}")
 
 def main():
     print("="*60)
     print("SONAR OBJECT DETECTION: AUTOMATED EXPERIMENT PIPELINE")
     print("="*60)
     print(f"Total experiments planned: {len(EXPERIMENTS)}")
-    print(f"Epochs per run: {EPOCHS}")
     print("="*60)
 
-    for mode, use_dwt in EXPERIMENTS:
-        run_cmd(mode, use_dwt)
+    for mode, use_dwt, use_sonar_aug in EXPERIMENTS:
+        run_cmd(mode, use_dwt, use_sonar_aug)
 
     print("\n" + "="*60)
     print("ALL EXPERIMENTS COMPLETED")
