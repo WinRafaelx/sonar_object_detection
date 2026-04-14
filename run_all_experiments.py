@@ -6,11 +6,11 @@ import time
 
 # List of experiments to run: (mode, use_dwt)
 EXPERIMENTS = [
-    ("standard", False),      # Baseline
-    ("spdconv", False),       # Backbone optimization (SOCA)
-    ("hybrid", False),        # Full Architecture (SPDConv + Attention + BiFPN)
-    ("standard", True),       # DWT Pre-processing only
-    ("hybrid", True),         # Full Architecture + DWT (The "Ultimate" model)
+    # ("standard", False),      # Completed
+    # ("spdconv", False),       # Completed
+    ("hybrid", False),        # Full Architecture (SPDConv + Attention + BiFPN) - FAILED/SKIPPED
+    # ("standard", True),       # Completed
+    ("hybrid", True),         # Full Architecture + DWT (The "Ultimate" model) - FAILED/SKIPPED
 ]
 
 # You can reduce this for a "quick check" or keep at 100+ for final results

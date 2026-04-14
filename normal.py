@@ -24,7 +24,7 @@ import kaggle
 
 # --- 2. MONKEY-PATCHING ---
 def patch_yolo_parser():
-    """Register custom modules and patch the YOLO model parser."""
+    \"\"\"Register custom modules and patch the YOLO model parser.\"\"\"
     setattr(tasks, 'SonarSPDConv', SonarSPDConv)
     setattr(tasks, 'CoordAtt', CoordAtt)
     setattr(tasks, 'CBAM', CBAM)
@@ -33,9 +33,21 @@ def patch_yolo_parser():
     
     try:
         source = inspect.getsource(tasks.parse_model)
-        custom_mods = "SonarSPDConv, CoordAtt, CBAM, EMA, BiFPN_Concat2,"
         if "SonarSPDConv" not in source:
-            new_source = source.replace("A2C2f,", f"A2C2f, {custom_mods}", 1)
+            # 1. Add single-input modules to base_modules (except EMA which has a different signature)
+            # CBAM is already there in recent YOLOv11 versions, but we add it just in case it's missing
+            source = source.replace("SPDConv,", "SPDConv, SonarSPDConv, CoordAtt, CBAM,", 1)
+            
+            # 2. Add BiFPN_Concat2 branch (handles multiple inputs)
+            concat_branch = "elif m is Concat:\n            c2 = sum(ch[x] for x in f)"
+            if concat_branch in source:
+                bifpn_branch = concat_branch + "\n        elif m is BiFPN_Concat2:\n            c2 = args[0]\n            if c2 != nc:\n                c2 = make_divisible(min(c2, max_channels) * width, 8)\n            args = [[ch[x] for x in f], c2]"
+                source = source.replace(concat_branch, bifpn_branch)
+            
+            # 3. Handle EMA (single input, but signature is (channels, factor))
+            ema_branch = "\n        elif m is EMA:\n            c2 = ch[f]\n            args = [c2, *args]"
+            source = source.replace("else:\n            c2 = ch[f]", ema_branch + "\n        else:\n            c2 = ch[f]")
+
             exec_globals = tasks.__dict__.copy()
             exec_globals.update({
                 'SonarSPDConv': SonarSPDConv,
@@ -46,10 +58,12 @@ def patch_yolo_parser():
                 'torch': torch,
                 'nn': nn,
                 'inspect': inspect,
+                'ast': __import__('ast'),
+                'contextlib': __import__('contextlib'),
             })
-            exec(new_source, exec_globals)
+            exec(source, exec_globals)
             tasks.parse_model = exec_globals['parse_model']
-            print("✓ Successfully patched YOLO model parser.")
+            print("✓ Successfully patched YOLO model parser with BiFPN and Attention support.")
     except Exception as e:
         print(f"⚠ Warning: Could not patch model parser: {e}")
 

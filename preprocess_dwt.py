@@ -38,15 +38,18 @@ def setup_dwt_dataset(src_dir):
     dwt = DWTForward(J=1, wave='haar', mode='zero').to(device)
     
     # Get all images in train, val, test folders
+    extensions = ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.PNG']
     paths = []
     for split in ['train', 'val', 'test']:
         split_path = os.path.join(dest_dir, split, 'images')
         if os.path.exists(split_path):
-            paths.extend(glob(os.path.join(split_path, "*.jpg")))
+            for ext in extensions:
+                paths.extend(glob(os.path.join(split_path, ext)))
 
     if not paths:
-        print("⚠ Warning: No images found in standard YOLO structure (train/val/test/images). Searching recursively...")
-        paths = glob(os.path.join(dest_dir, "**/*.jpg"), recursive=True)
+        print(f"⚠ Warning: No images found in standard YOLO structure in {dest_dir}. Searching recursively...")
+        for ext in extensions:
+            paths.extend(glob(os.path.join(dest_dir, "**", ext), recursive=True))
 
     dataset = SonarDataset(paths)
     dataloader = DataLoader(dataset, batch_size=32, shuffle=False)
