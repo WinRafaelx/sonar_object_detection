@@ -34,9 +34,8 @@ def patch_yolo_parser():
     try:
         source = inspect.getsource(tasks.parse_model)
         if "SonarSPDConv" not in source:
-            # 1. Add single-input modules to base_modules (except EMA which has a different signature)
-            # CBAM is already there in recent YOLOv11 versions, but we add it just in case it's missing
-            source = source.replace("SPDConv,", "SPDConv, SonarSPDConv, CoordAtt, CBAM,", 1)
+            # 1. Add single-input modules to base_modules AND repeat_modules
+            source = source.replace("SPDConv,", "SPDConv, SonarSPDConv, CoordAtt, CBAM,", 2)
             
             # 2. Add BiFPN_Concat2 branch (handles multiple inputs)
             concat_branch = "elif m is Concat:\n            c2 = sum(ch[x] for x in f)"
@@ -46,6 +45,7 @@ def patch_yolo_parser():
             
             # 3. Handle EMA (single input, but signature is (channels, factor))
             ema_branch = "\n        elif m is EMA:\n            c2 = ch[f]\n            args = [c2, *args]"
+            # Replacing only the final else block for c2 assignment
             source = source.replace("else:\n            c2 = ch[f]", ema_branch + "\n        else:\n            c2 = ch[f]")
 
             exec_globals = tasks.__dict__.copy()
