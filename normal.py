@@ -24,7 +24,7 @@ import kaggle
 
 # --- 2. MONKEY-PATCHING ---
 def patch_yolo_parser():
-    \"\"\"Register custom modules and patch the YOLO model parser.\"\"\"
+    """Register custom modules and patch the YOLO model parser."""
     setattr(tasks, 'SonarSPDConv', SonarSPDConv)
     setattr(tasks, 'CoordAtt', CoordAtt)
     setattr(tasks, 'CBAM', CBAM)
