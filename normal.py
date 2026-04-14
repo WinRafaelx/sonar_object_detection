@@ -34,7 +34,7 @@ def patch_yolo_parser():
     try:
         source = inspect.getsource(tasks.parse_model)
         if "SonarSPDConv" not in source:
-            # 1. Add single-input modules to base_modules AND repeat_modules
+            # 1. Add single-input modules that follow (c1, c2, n) signature to base_modules AND repeat_modules
             source = source.replace("SPDConv,", "SPDConv, SonarSPDConv, CoordAtt, CBAM,", 2)
             
             # 2. Add BiFPN_Concat2 branch (handles multiple inputs)
@@ -43,9 +43,8 @@ def patch_yolo_parser():
                 bifpn_branch = concat_branch + "\n        elif m is BiFPN_Concat2:\n            c2 = args[0]\n            if c2 != nc:\n                c2 = make_divisible(min(c2, max_channels) * width, 8)\n            args = [[ch[x] for x in f], c2]"
                 source = source.replace(concat_branch, bifpn_branch)
             
-            # 3. Handle EMA (single input, but signature is (channels, factor))
+            # 3. Handle EMA specifically because its signature is (channels, factor)
             ema_branch = "\n        elif m is EMA:\n            c2 = ch[f]\n            args = [c2, *args]"
-            # Replacing only the final else block for c2 assignment
             source = source.replace("else:\n            c2 = ch[f]", ema_branch + "\n        else:\n            c2 = ch[f]")
 
             exec_globals = tasks.__dict__.copy()

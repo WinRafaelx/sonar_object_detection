@@ -4,7 +4,7 @@ import torch.nn.functional as F
 
 # 1. SonarSPDConv: Space-to-Depth Downsampler compatible with YOLO scaling
 class SonarSPDConv(nn.Module):
-    def __init__(self, c1, c2, k=1, dimension=1):
+    def __init__(self, c1, c2, n=1, k=1, dimension=1):
         super().__init__()
         self.d = dimension
         # SPD-Conv stacks 4 sub-pixels into the channel dimension
@@ -22,7 +22,7 @@ class SonarSPDConv(nn.Module):
 
 # 2. CoordAtt: Coordinate Attention
 class CoordAtt(nn.Module):
-    def __init__(self, inp, oup, reduction=32):
+    def __init__(self, inp, oup, n=1, reduction=32):
         super(CoordAtt, self).__init__()
         self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
         self.pool_w = nn.AdaptiveAvgPool2d((1, None))
