@@ -35,7 +35,17 @@ def patch_yolo_parser():
         source = inspect.getsource(tasks.parse_model)
         if "SonarSPDConv" not in source:
             # 1. Add single-input modules that follow (c1, c2, n) signature to base_modules AND repeat_modules
-            source = source.replace("SPDConv,", "SPDConv, SonarSPDConv, CoordAtt, CBAM,", 2)
+            # We try multiple anchors to be robust across different Ultralytics versions
+            patched = False
+            for anchor in ["SPDConv,", "C2fCIB,", "C2f,", "Conv,"]:
+                if anchor in source:
+                    # Replace the first 2 occurrences (base_modules and repeat_modules)
+                    source = source.replace(anchor, f"{anchor} SonarSPDConv, CoordAtt, CBAM,", 2)
+                    patched = True
+                    break
+            
+            if not patched:
+                print("⚠ Warning: Could not find a suitable anchor in parse_model to patch custom modules.")
             
             # 2. Add BiFPN_Concat2 branch (handles multiple inputs)
             concat_branch = "elif m is Concat:\n            c2 = sum(ch[x] for x in f)"
