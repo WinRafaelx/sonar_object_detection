@@ -26,24 +26,27 @@ class SonarAugmentDataset(Dataset):
         tensor = torch.from_numpy(img_resized).unsqueeze(0).float() / 255.0
         return tensor, path, h_orig, w_orig
 
-def inject_speckle_noise(tensors, intensity=0.1):
+def inject_speckle_noise(tensors, intensity=0.05):
     """Adds multiplicative speckle noise: I = I + I * noise."""
+    # Only apply to ~50% of the batch
+    mask = (torch.rand(tensors.shape[0], 1, 1, 1, device=tensors.device) > 0.5).float()
     noise = torch.randn_like(tensors) * intensity
-    return torch.clamp(tensors + tensors * noise, 0, 1)
+    return torch.clamp(tensors + (tensors * noise * mask), 0, 1)
 
-def inject_acoustic_shadows(tensors, num_shadows=2):
-    """Simulates sonar shadows by darkening random rectangular regions."""
+def inject_acoustic_shadows(tensors, num_shadows=1, prob=0.3):
+    """Simulates sonar shadows by darkening random small rectangular regions."""
     b, c, h, w = tensors.shape
     for i in range(b):
+        if torch.rand(1).item() > prob:
+            continue
         for _ in range(num_shadows):
-            # Random shadow size and position
-            sh = torch.randint(20, 100, (1,)).item()
-            sw = torch.randint(50, 200, (1,)).item()
+            # Random SMALL shadow size
+            sh = torch.randint(10, 40, (1,)).item()
+            sw = torch.randint(20, 80, (1,)).item()
             sy = torch.randint(0, h - sh, (1,)).item()
             sx = torch.randint(0, w - sw, (1,)).item()
             
-            # Apply darkening factor (shadow is never pitch black in sonar)
-            factor = torch.rand(1).item() * 0.5 + 0.1 # 0.1 to 0.6 brightness
+            factor = torch.rand(1).item() * 0.3 + 0.3 # 0.3 to 0.6 brightness
             tensors[i, :, sy:sy+sh, sx:sx+sw] *= factor
     return tensors
 

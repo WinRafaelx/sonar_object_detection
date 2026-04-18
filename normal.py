@@ -10,6 +10,7 @@ from ultralytics import YOLO
 import ultralytics.nn.tasks as tasks
 from constant import batch_size as default_batch_size
 import argparse
+import contextlib
 
 # Import custom modules
 from custom_modules import SonarSPDConv, CoordAtt, CBAM, EMA, BiFPN_Concat2
@@ -36,17 +37,12 @@ def patch_yolo_parser():
         source = inspect.getsource(tasks.parse_model)
         if "SonarSPDConv" not in source:
             # 1. Add single-input modules that follow (c1, c2, n) signature to base_modules AND repeat_modules
-            # We try multiple anchors to be robust across different Ultralytics versions
             patched = False
             for anchor in ["SPDConv,", "C2fCIB,", "C2f,", "Conv,"]:
                 if anchor in source:
-                    # Replace the first 2 occurrences (base_modules and repeat_modules)
                     source = source.replace(anchor, f"{anchor} SonarSPDConv, CoordAtt, CBAM,", 2)
                     patched = True
                     break
-            
-            if not patched:
-                print("⚠ Warning: Could not find a suitable anchor in parse_model to patch custom modules.")
             
             # 2. Add BiFPN_Concat2 branch (handles multiple inputs)
             concat_branch = "elif m is Concat:\n            c2 = sum(ch[x] for x in f)"
@@ -69,7 +65,7 @@ def patch_yolo_parser():
                 'nn': nn,
                 'inspect': inspect,
                 'ast': __import__('ast'),
-                'contextlib': __import__('contextlib'),
+                'contextlib': contextlib,
             })
             exec(source, exec_globals)
             tasks.parse_model = exec_globals['parse_model']
@@ -106,6 +102,12 @@ def run_experiment(args):
     # Load hyperparams
     with open('best_hyperparameters.yaml', 'r') as f:
         best_hyp = yaml.safe_load(f)
+    
+    # Overrides for Hyper-Experimentation
+    if args.box is not None:
+        best_hyp['box'] = args.box
+    if args.cls is not None:
+        best_hyp['cls'] = args.cls
 
     # Dataset Setup
     base_data_dir = os.path.abspath('./data')
@@ -115,7 +117,7 @@ def run_experiment(args):
         print("Downloading SSS dataset...")
         kaggle.api.dataset_download_files('mawins/sample-sss-img', path=base_data_dir, unzip=True)
     
-    # Apply DWT if requested
+    # Apply Augmentations
     if use_dwt:
         sss_dir = setup_dwt_dataset(sss_dir)
     elif args.sonar_aug:
@@ -152,8 +154,9 @@ def run_experiment(args):
         batch=args.batch,
         optimizer=args.optimizer,
         device=args.device,
+        freeze=args.freeze,
         project="runs/experiments",
-        name=f"exp_{mode}_{'dwt' if use_dwt else ('sonar_aug' if args.sonar_aug else 'normal')}",
+        name=f"exp_{mode}_{'dwt' if use_dwt else ('sonar_aug' if args.sonar_aug else 'normal')}_f{args.freeze}_b{best_hyp['box']}",
         verbose=True,
         **best_hyp
     )
@@ -162,6 +165,8 @@ def run_experiment(args):
     metrics["mode"] = mode
     metrics["use_dwt"] = use_dwt
     metrics["sonar_aug"] = args.sonar_aug
+    metrics["freeze"] = args.freeze
+    metrics["box_gain"] = best_hyp['box']
     return metrics
 
 if __name__ == "__main__":
@@ -173,6 +178,11 @@ if __name__ == "__main__":
     parser.add_argument("--mode", type=str, default="standard", choices=["standard", "spdconv", "hybrid"])
     parser.add_argument("--dwt", action="store_true", help="Use DWT preprocessed dataset")
     parser.add_argument("--sonar_aug", action="store_true", help="Use Sonar-Augmented (Speckle/Shadows) dataset")
+    
+    # Hyper-tuning Overrides
+    parser.add_argument("--freeze", type=int, default=0, help="Number of layers to freeze")
+    parser.add_argument("--box", type=float, help="Override box loss gain")
+    parser.add_argument("--cls", type=float, help="Override class loss gain")
     
     # Training Parameters
     parser.add_argument("--epochs", type=int, default=100, help="Total number of training epochs")

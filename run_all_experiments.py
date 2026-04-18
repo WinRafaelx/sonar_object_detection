@@ -4,22 +4,49 @@ import os
 import pandas as pd
 import time
 
-# List of experiments to run: (mode, use_dwt, use_sonar_aug)
+# Matrix of 20 experiments: (mode, dwt, sonar_aug, freeze, box_gain, epochs)
+# This is designed to run for ~8 hours on an A40
 EXPERIMENTS = [
-    ("hybrid", False, True),  # Full Architecture + Sonar Augmentation (Speckle/Shadows)
+    # --- BASELINES (100 Epochs) ---
+    ("standard", False, False, 0, 7.5, 100),
+    ("spdconv", False, False, 0, 7.5, 100),
+    ("hybrid", False, False, 0, 7.5, 100),
+    
+    # --- DWT SERIES ---
+    ("standard", True, False, 0, 7.5, 100),
+    ("spdconv", True, False, 0, 7.5, 100),
+    ("hybrid", True, False, 0, 7.5, 100),
+
+    # --- SONAR AUG SERIES (SMART NOISE) ---
+    ("standard", False, True, 0, 7.5, 100),
+    ("spdconv", False, True, 0, 7.5, 100),
+    ("hybrid", False, True, 0, 7.5, 100),
+    
+    # --- FREEZING STRATEGY (f10 vs f0) ---
+    ("spdconv", False, False, 10, 7.5, 100),
+    ("hybrid", False, False, 10, 7.5, 100),
+    ("hybrid", False, True, 10, 7.5, 100),
+    
+    # --- RECALL OPTIMIZATION (High Box Gain) ---
+    ("hybrid", False, False, 10, 10.0, 100),
+    ("hybrid", False, True, 10, 10.0, 100),
+    
+    # --- LONG RUNS (300 Epochs) ---
+    ("standard", False, False, 0, 7.5, 300),
+    ("spdconv", False, False, 0, 7.5, 300),
+    ("hybrid", False, False, 10, 7.5, 300),
+    ("hybrid", False, True, 10, 7.5, 300),
+    ("hybrid", False, True, 0, 10.0, 300),
+    ("hybrid", True, False, 0, 7.5, 300),
 ]
 
-# Standard epochs for most runs
-EPOCHS = 100
-# High-intensity training for the final model
-ULTIMATE_EPOCHS = 300
-
-def run_cmd(mode, use_dwt, use_sonar_aug):
-    epochs = ULTIMATE_EPOCHS if use_sonar_aug else EPOCHS
+def run_cmd(mode, use_dwt, use_sonar_aug, freeze, box_gain, epochs):
     cmd = [
         sys.executable, "normal.py",
         "--mode", mode,
-        "--epochs", str(epochs)
+        "--epochs", str(epochs),
+        "--freeze", str(freeze),
+        "--box", str(box_gain)
     ]
     if use_dwt:
         cmd.append("--dwt")
@@ -30,22 +57,21 @@ def run_cmd(mode, use_dwt, use_sonar_aug):
     start_time = time.time()
     
     try:
-        # We use subprocess.run to ensure each training session starts with a fresh memory/CUDA state
         subprocess.run(cmd, check=True)
         duration = (time.time() - start_time) / 60
-        print(f">>> SUCCESS: {mode} (DWT={use_dwt}, SonarAug={use_sonar_aug}) completed in {duration:.2f} minutes.")
+        print(f">>> SUCCESS: {mode} (DWT={use_dwt}, SonarAug={use_sonar_aug}, F={freeze}, B={box_gain}) in {duration:.2f}m")
     except subprocess.CalledProcessError as e:
-        print(f">>> ERROR: Experiment {mode} (DWT={use_dwt}, SonarAug={use_sonar_aug}) failed with error: {e}")
+        print(f">>> ERROR: Experiment {mode} failed: {e}")
 
 def main():
     print("="*60)
-    print("SONAR OBJECT DETECTION: AUTOMATED EXPERIMENT PIPELINE")
+    print("SONAR OBJECT DETECTION: 8-HOUR HYPER-EXPERIMENT MATRIX")
     print("="*60)
     print(f"Total experiments planned: {len(EXPERIMENTS)}")
     print("="*60)
 
-    for mode, use_dwt, use_sonar_aug in EXPERIMENTS:
-        run_cmd(mode, use_dwt, use_sonar_aug)
+    for mode, use_dwt, use_sonar_aug, freeze, box_gain, epochs in EXPERIMENTS:
+        run_cmd(mode, use_dwt, use_sonar_aug, freeze, box_gain, epochs)
 
     print("\n" + "="*60)
     print("ALL EXPERIMENTS COMPLETED")
