@@ -140,17 +140,26 @@ def run_experiment(args):
         stage1_epochs = min(30, max(1, args.epochs // 2))
         stage2_epochs = max(1, args.epochs - stage1_epochs)
         print(f">>> Stage 1: Training Frozen ({stage1_epochs} Epochs)...")
+
+        # We use exist_ok=True to ensure the path remains predictable
         model.train(
             data=sss_yaml, imgsz=args.imgsz, epochs=stage1_epochs, batch=args.batch,
-            freeze=10, project="runs/experiments", name=exp_name, **best_hyp
+            freeze=10, project="runs/experiments", name=exp_name, exist_ok=True, **best_hyp
         )
-        print(f">>> Stage 2: Unfreezing and Finishing ({stage2_epochs} Epochs)...")
-        # Load best weights from stage 1 and finish
+
+        print(">>> Stage 1 Complete. Loading best weights for Stage 2...")
+        # Path to best weights from the run we just finished
         best_pt = os.path.join("runs/experiments", exp_name, "weights", "best.pt")
+
+        if not os.path.exists(best_pt):
+            print(f"⚠ Warning: {best_pt} not found, trying last.pt")
+            best_pt = os.path.join("runs/experiments", exp_name, "weights", "last.pt")
+
         model = YOLO(best_pt)
+        print(f">>> Stage 2: Unfreezing and Finishing ({stage2_epochs} Epochs)...")
         results = model.train(
             data=sss_yaml, imgsz=args.imgsz, epochs=stage2_epochs, batch=args.batch,
-            freeze=0, project="runs/experiments", name=exp_name + "_final", **best_hyp
+            freeze=0, project="runs/experiments", name=exp_name + "_final", exist_ok=True, **best_hyp
         )
     else:
         results = model.train(
