@@ -136,35 +136,47 @@ def run_experiment(args):
     exp_name = f"exp_{mode}_{'dwt' if use_dwt else ('aug' if args.sonar_aug else 'norm')}_f{args.freeze}_b{best_hyp['box']}_c{best_hyp['cls']}"
 
     # Execution
+    project_dir = os.path.abspath("runs/experiments")
+    
     if args.two_stage:
         stage1_epochs = min(30, max(1, args.epochs // 2))
         stage2_epochs = max(1, args.epochs - stage1_epochs)
         print(f">>> Stage 1: Training Frozen ({stage1_epochs} Epochs)...")
-
-        # We use exist_ok=True to ensure the path remains predictable
+        
+        # Use absolute path for project to ensure predictable location
         model.train(
             data=sss_yaml, imgsz=args.imgsz, epochs=stage1_epochs, batch=args.batch,
-            freeze=10, project="runs/experiments", name=exp_name, exist_ok=True, **best_hyp
+            freeze=10, project=project_dir, name=exp_name, exist_ok=True, **best_hyp
         )
+        
+        print(">>> Stage 1 Complete. Searching for weights...")
+        # Check standard path and the 'detect' subfolder path YOLO sometimes creates
+        possible_paths = [
+            os.path.join(project_dir, exp_name, "weights", "best.pt"),
+            os.path.join(project_dir, exp_name, "weights", "last.pt"),
+            os.path.join("runs", "detect", exp_name, "weights", "best.pt")
+        ]
+        
+        best_pt = None
+        for p in possible_paths:
+            if os.path.exists(p):
+                best_pt = p
+                break
+        
+        if not best_pt:
+            raise FileNotFoundError(f"Could not find Stage 1 weights in any of: {possible_paths}")
 
-        print(">>> Stage 1 Complete. Loading best weights for Stage 2...")
-        # Path to best weights from the run we just finished
-        best_pt = os.path.join("runs/experiments", exp_name, "weights", "best.pt")
-
-        if not os.path.exists(best_pt):
-            print(f"⚠ Warning: {best_pt} not found, trying last.pt")
-            best_pt = os.path.join("runs/experiments", exp_name, "weights", "last.pt")
-
+        print(f">>> Loading weights from: {best_pt}")
         model = YOLO(best_pt)
         print(f">>> Stage 2: Unfreezing and Finishing ({stage2_epochs} Epochs)...")
         results = model.train(
             data=sss_yaml, imgsz=args.imgsz, epochs=stage2_epochs, batch=args.batch,
-            freeze=0, project="runs/experiments", name=exp_name + "_final", exist_ok=True, **best_hyp
+            freeze=0, project=project_dir, name=exp_name + "_final", exist_ok=True, **best_hyp
         )
     else:
         results = model.train(
             data=sss_yaml, imgsz=args.imgsz, epochs=args.epochs, batch=args.batch,
-            freeze=args.freeze, project="runs/experiments", name=exp_name, **best_hyp
+            freeze=args.freeze, project=project_dir, name=exp_name, exist_ok=True, **best_hyp
         )
     
     metrics = get_metrics(results)
