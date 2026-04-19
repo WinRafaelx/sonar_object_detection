@@ -11,6 +11,7 @@ import ultralytics.nn.tasks as tasks
 from constant import batch_size as default_batch_size
 import argparse
 import contextlib
+import shutil
 
 # Import custom modules
 from custom_modules import SonarSPDConv, CoordAtt, CBAM, EMA, BiFPN_Concat2
@@ -36,7 +37,6 @@ def patch_yolo_parser():
     try:
         source = inspect.getsource(tasks.parse_model)
         if "SonarSPDConv" not in source:
-            # 1. Add single-input modules that follow (c1, c2, n) signature to base_modules AND repeat_modules
             patched = False
             for anchor in ["SPDConv,", "C2fCIB,", "C2f,", "Conv,"]:
                 if anchor in source:
@@ -44,13 +44,11 @@ def patch_yolo_parser():
                     patched = True
                     break
             
-            # 2. Add BiFPN_Concat2 branch (handles multiple inputs)
             concat_branch = "elif m is Concat:\n            c2 = sum(ch[x] for x in f)"
             if concat_branch in source:
                 bifpn_branch = concat_branch + "\n        elif m is BiFPN_Concat2:\n            c2 = args[0]\n            if c2 != nc:\n                c2 = make_divisible(min(c2, max_channels) * width, 8)\n            args = [[ch[x] for x in f], c2]"
                 source = source.replace(concat_branch, bifpn_branch)
             
-            # 3. Handle EMA specifically because its signature is (channels, factor)
             ema_branch = "\n        elif m is EMA:\n            c2 = ch[f]\n            args = [c2, *args]"
             source = source.replace("else:\n            c2 = ch[f]", ema_branch + "\n        else:\n            c2 = ch[f]")
 
@@ -69,7 +67,7 @@ def patch_yolo_parser():
             })
             exec(source, exec_globals)
             tasks.parse_model = exec_globals['parse_model']
-            print("✓ Successfully patched YOLO model parser with BiFPN and Attention support.")
+            print("✓ Successfully patched YOLO model parser.")
     except Exception as e:
         print(f"⚠ Warning: Could not patch model parser: {e}")
 
@@ -99,104 +97,93 @@ def run_experiment(args):
     use_dwt = args.dwt
     print(f"\n{'='*20} STARTING EXPERIMENT: {mode.upper()} {' (DWT=' + str(use_dwt) + ')'} {'='*20}")
     
-    # Load hyperparams
     with open('best_hyperparameters.yaml', 'r') as f:
         best_hyp = yaml.safe_load(f)
     
-    # Overrides for Hyper-Experimentation
-    if args.box is not None:
-        best_hyp['box'] = args.box
-    if args.cls is not None:
-        best_hyp['cls'] = args.cls
+    if args.box is not None: best_hyp['box'] = args.box
+    if args.cls is not None: best_hyp['cls'] = args.cls
 
     # Dataset Setup
     base_data_dir = os.path.abspath('./data')
     sss_dir = os.path.join(base_data_dir, 'sampled_yolo_dataset')
     
     if not os.path.exists(sss_dir):
-        print("Downloading SSS dataset...")
         kaggle.api.dataset_download_files('mawins/sample-sss-img', path=base_data_dir, unzip=True)
     
-    # Apply Augmentations
     if use_dwt:
         sss_dir = setup_dwt_dataset(sss_dir)
     elif args.sonar_aug:
-        sss_dir = setup_sonar_augmented_dataset(sss_dir)
+        # Pass intensity to augmentation script
+        sss_dir = setup_sonar_augmented_dataset(sss_dir, intensity=args.aug_intensity)
 
     sss_yaml = patch_data_yaml(os.path.join(sss_dir, 'data.yaml'), sss_dir)
-    
-    # Architecture & Weights Setup
     model_yaml_path = f"tmp_{mode}.yaml"
     pretrained_weights = "yolo11n.pt"
     
     with open(sss_yaml, 'r') as f:
         nc = yaml.safe_load(f)['nc']
 
+    # Build Model
     if mode == "standard":
         model = YOLO(pretrained_weights)
     elif mode == "spdconv":
-        with open(model_yaml_path, "w") as f:
-            f.write(f"nc: {nc}\n" + SPDCONV_YOLO_YAML)
+        with open(model_yaml_path, "w") as f: f.write(f"nc: {nc}\n" + SPDCONV_YOLO_YAML)
         model = YOLO(model_yaml_path).load(pretrained_weights)
     elif mode == "hybrid":
-        with open(model_yaml_path, "w") as f:
-            f.write(f"nc: {nc}\n" + ATTN_SPDCONV_YOLO_YAML)
+        with open(model_yaml_path, "w") as f: f.write(f"nc: {nc}\n" + ATTN_SPDCONV_YOLO_YAML)
         model = YOLO(model_yaml_path).load(pretrained_weights)
-    else:
-        raise ValueError("Invalid mode")
 
-    # Training
-    results = model.train(
-        data=sss_yaml,
-        imgsz=args.imgsz,
-        epochs=args.epochs,
-        patience=args.patience,
-        batch=args.batch,
-        optimizer=args.optimizer,
-        device=args.device,
-        freeze=args.freeze,
-        project="runs/experiments",
-        name=f"exp_{mode}_{'dwt' if use_dwt else ('sonar_aug' if args.sonar_aug else 'normal')}_f{args.freeze}_b{best_hyp['box']}",
-        verbose=True,
-        **best_hyp
-    )
+    exp_name = f"exp_{mode}_{'dwt' if use_dwt else ('aug' if args.sonar_aug else 'norm')}_f{args.freeze}_b{best_hyp['box']}_c{best_hyp['cls']}"
+
+    # Execution
+    if args.two_stage:
+        stage1_epochs = min(30, max(1, args.epochs // 2))
+        stage2_epochs = max(1, args.epochs - stage1_epochs)
+        print(f">>> Stage 1: Training Frozen ({stage1_epochs} Epochs)...")
+        model.train(
+            data=sss_yaml, imgsz=args.imgsz, epochs=stage1_epochs, batch=args.batch,
+            freeze=10, project="runs/experiments", name=exp_name, **best_hyp
+        )
+        print(f">>> Stage 2: Unfreezing and Finishing ({stage2_epochs} Epochs)...")
+        # Load best weights from stage 1 and finish
+        best_pt = os.path.join("runs/experiments", exp_name, "weights", "best.pt")
+        model = YOLO(best_pt)
+        results = model.train(
+            data=sss_yaml, imgsz=args.imgsz, epochs=stage2_epochs, batch=args.batch,
+            freeze=0, project="runs/experiments", name=exp_name + "_final", **best_hyp
+        )
+    else:
+        results = model.train(
+            data=sss_yaml, imgsz=args.imgsz, epochs=args.epochs, batch=args.batch,
+            freeze=args.freeze, project="runs/experiments", name=exp_name, **best_hyp
+        )
     
     metrics = get_metrics(results)
-    metrics["mode"] = mode
-    metrics["use_dwt"] = use_dwt
-    metrics["sonar_aug"] = args.sonar_aug
-    metrics["freeze"] = args.freeze
-    metrics["box_gain"] = best_hyp['box']
+    metrics.update({"mode": mode, "use_dwt": use_dwt, "sonar_aug": args.sonar_aug, 
+                    "freeze": args.freeze, "box_gain": best_hyp['box'], "cls_gain": best_hyp['cls'],
+                    "two_stage": args.two_stage, "intensity": args.aug_intensity})
     return metrics
 
 if __name__ == "__main__":
-    # Determine the most sensible default device
-    default_device = "0" if torch.cuda.is_available() else "cpu"
-    
     parser = argparse.ArgumentParser()
-    # High-level Experiment Config
     parser.add_argument("--mode", type=str, default="standard", choices=["standard", "spdconv", "hybrid"])
-    parser.add_argument("--dwt", action="store_true", help="Use DWT preprocessed dataset")
-    parser.add_argument("--sonar_aug", action="store_true", help="Use Sonar-Augmented (Speckle/Shadows) dataset")
-    
-    # Hyper-tuning Overrides
-    parser.add_argument("--freeze", type=int, default=0, help="Number of layers to freeze")
-    parser.add_argument("--box", type=float, help="Override box loss gain")
-    parser.add_argument("--cls", type=float, help="Override class loss gain")
-    
-    # Training Parameters
-    parser.add_argument("--epochs", type=int, default=100, help="Total number of training epochs")
-    parser.add_argument("--batch", type=int, default=default_batch_size, help="Batch size for training")
-    parser.add_argument("--imgsz", type=int, default=640, help="Input image size")
-    parser.add_argument("--patience", type=int, default=50, help="Early stopping patience")
-    parser.add_argument("--optimizer", type=str, default="AdamW", help="Optimizer to use (SGD, Adam, AdamW, etc.)")
-    parser.add_argument("--device", type=str, default=default_device, help="CUDA device index (e.g. 0) or 'cpu'")
+    parser.add_argument("--dwt", action="store_true")
+    parser.add_argument("--sonar_aug", action="store_true")
+    parser.add_argument("--aug_intensity", type=float, default=0.02)
+    parser.add_argument("--freeze", type=int, default=0)
+    parser.add_argument("--two_stage", action="store_true")
+    parser.add_argument("--box", type=float)
+    parser.add_argument("--cls", type=float)
+    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--batch", type=int, default=default_batch_size)
+    parser.add_argument("--imgsz", type=int, default=640)
+    parser.add_argument("--patience", type=int, default=50)
+    parser.add_argument("--optimizer", type=str, default="AdamW")
+    parser.add_argument("--device", type=str, default="0")
     
     args = parser.parse_args()
-
     metrics = run_experiment(args)
     
-    # Save results summary
     summary_file = "experiment_results.csv"
     df_new = pd.DataFrame([metrics])
     if os.path.exists(summary_file):
@@ -204,7 +191,5 @@ if __name__ == "__main__":
         df_final = pd.concat([df_old, df_new], ignore_index=True)
     else:
         df_final = df_new
-    
     df_final.to_csv(summary_file, index=False)
-    print(f"\n✓ Experiment {args.mode} complete. Results appended to {summary_file}")
     print(df_new)

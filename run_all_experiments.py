@@ -4,54 +4,49 @@ import os
 import pandas as pd
 import time
 
-# Matrix of 20 experiments: (mode, dwt, sonar_aug, freeze, box_gain, epochs)
-# This is designed to run for ~8 hours on an A40
+# Matrix of 16 targeted experiments for Phase 3: 
+# (mode, dwt, sonar_aug, intensity, freeze, two_stage, box_gain, cls_gain, epochs)
 EXPERIMENTS = [
-    # --- BASELINES (100 Epochs) ---
-    ("standard", False, False, 0, 7.5, 100),
-    ("spdconv", False, False, 0, 7.5, 100),
-    ("hybrid", False, False, 0, 7.5, 100),
-    
-    # --- DWT SERIES ---
-    ("standard", True, False, 0, 7.5, 100),
-    ("spdconv", True, False, 0, 7.5, 100),
-    ("hybrid", True, False, 0, 7.5, 100),
+    # --- GROUP A: RECALL AGGRESSION (Focus on finding everything) ---
+    ("hybrid", False, False, 0.0, 0, False, 12.0, 1.0, 100),
+    ("hybrid", False, False, 0.0, 0, False, 15.0, 1.0, 100),
+    ("hybrid", False, False, 0.0, 0, False, 12.0, 1.5, 100),
+    ("spdconv", False, False, 0.0, 0, False, 12.0, 1.0, 100),
 
-    # --- SONAR AUG SERIES (SMART NOISE) ---
-    ("standard", False, True, 0, 7.5, 100),
-    ("spdconv", False, True, 0, 7.5, 100),
-    ("hybrid", False, True, 0, 7.5, 100),
+    # --- GROUP B: TWO-STAGE "UNFREEZER" (Stability then Accuracy) ---
+    ("hybrid", False, False, 0.0, 0, True, 10.0, 1.0, 300),
+    ("hybrid", False, True, 0.02, 0, True, 10.0, 1.0, 300),
+    ("spdconv", False, False, 0.0, 0, True, 10.0, 1.0, 300),
+
+    # --- GROUP C: THE "SOFT TOUCH" (Subtle Noise for Precision) ---
+    ("hybrid", False, True, 0.01, 0, False, 10.0, 1.0, 100),
+    ("hybrid", False, True, 0.02, 0, False, 10.0, 1.0, 100),
+    ("hybrid", False, True, 0.03, 0, False, 10.0, 1.0, 100),
+
+    # --- GROUP D: THE FUSION (Best of all worlds) ---
+    ("hybrid", False, True, 0.02, 0, True, 12.0, 1.5, 300),
+    ("hybrid", False, True, 0.01, 0, True, 15.0, 1.2, 300),
+    ("spdconv", False, True, 0.02, 0, True, 12.0, 1.0, 300),
     
-    # --- FREEZING STRATEGY (f10 vs f0) ---
-    ("spdconv", False, False, 10, 7.5, 100),
-    ("hybrid", False, False, 10, 7.5, 100),
-    ("hybrid", False, True, 10, 7.5, 100),
-    
-    # --- RECALL OPTIMIZATION (High Box Gain) ---
-    ("hybrid", False, False, 10, 10.0, 100),
-    ("hybrid", False, True, 10, 10.0, 100),
-    
-    # --- LONG RUNS (300 Epochs) ---
-    ("standard", False, False, 0, 7.5, 300),
-    ("spdconv", False, False, 0, 7.5, 300),
-    ("hybrid", False, False, 10, 7.5, 300),
-    ("hybrid", False, True, 10, 7.5, 300),
-    ("hybrid", False, True, 0, 10.0, 300),
-    ("hybrid", True, False, 0, 7.5, 300),
+    # --- GROUP E: DWT SECOND CHANCE (Longer training) ---
+    ("hybrid", True, False, 0.0, 0, True, 10.0, 1.0, 300),
+    ("standard", False, True, 0.02, 0, False, 10.0, 1.0, 100),
+    ("standard", False, False, 0, 12.0, 1.5, 100),
 ]
 
-def run_cmd(mode, use_dwt, use_sonar_aug, freeze, box_gain, epochs):
+def run_cmd(mode, dwt, aug, intensity, freeze, two_stage, box, cls, epochs):
     cmd = [
         sys.executable, "normal.py",
         "--mode", mode,
         "--epochs", str(epochs),
         "--freeze", str(freeze),
-        "--box", str(box_gain)
+        "--box", str(box),
+        "--cls", str(cls),
+        "--aug_intensity", str(intensity)
     ]
-    if use_dwt:
-        cmd.append("--dwt")
-    if use_sonar_aug:
-        cmd.append("--sonar_aug")
+    if dwt: cmd.append("--dwt")
+    if aug: cmd.append("--sonar_aug")
+    if two_stage: cmd.append("--two_stage")
     
     print(f"\n>>> RUNNING: {' '.join(cmd)}")
     start_time = time.time()
@@ -59,19 +54,19 @@ def run_cmd(mode, use_dwt, use_sonar_aug, freeze, box_gain, epochs):
     try:
         subprocess.run(cmd, check=True)
         duration = (time.time() - start_time) / 60
-        print(f">>> SUCCESS: {mode} (DWT={use_dwt}, SonarAug={use_sonar_aug}, F={freeze}, B={box_gain}) in {duration:.2f}m")
+        print(f">>> SUCCESS: {mode} (DWT={dwt}, Aug={aug}, B={box}, C={cls}, 2S={two_stage}) in {duration:.2f}m")
     except subprocess.CalledProcessError as e:
         print(f">>> ERROR: Experiment {mode} failed: {e}")
 
 def main():
     print("="*60)
-    print("SONAR OBJECT DETECTION: 8-HOUR HYPER-EXPERIMENT MATRIX")
+    print("SONAR DETECTION PHASE 3: THE RECALL & FUSION MATRIX")
     print("="*60)
     print(f"Total experiments planned: {len(EXPERIMENTS)}")
     print("="*60)
 
-    for mode, use_dwt, use_sonar_aug, freeze, box_gain, epochs in EXPERIMENTS:
-        run_cmd(mode, use_dwt, use_sonar_aug, freeze, box_gain, epochs)
+    for mode, dwt, aug, intensity, freeze, two_stage, box, cls, epochs in EXPERIMENTS:
+        run_cmd(mode, dwt, aug, intensity, freeze, two_stage, box, cls, epochs)
 
     print("\n" + "="*60)
     print("ALL EXPERIMENTS COMPLETED")
