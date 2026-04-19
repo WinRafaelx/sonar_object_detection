@@ -4,34 +4,11 @@ import os
 import pandas as pd
 import time
 
-# Matrix of 16 targeted experiments for Phase 3: 
-# (mode, dwt, sonar_aug, intensity, freeze, two_stage, box_gain, cls_gain, epochs)
+# Matrix of 16 targeted experiments - FINAL TWO CASES
 EXPERIMENTS = [
-    # --- GROUP A: RECALL AGGRESSION (Focus on finding everything) ---
-    ("hybrid", False, False, 0.0, 0, False, 12.0, 1.0, 100),
-    ("hybrid", False, False, 0.0, 0, False, 15.0, 1.0, 100),
-    ("hybrid", False, False, 0.0, 0, False, 12.0, 1.5, 100),
-    ("spdconv", False, False, 0.0, 0, False, 12.0, 1.0, 100),
-
-    # --- GROUP B: TWO-STAGE "UNFREEZER" (Stability then Accuracy) ---
-    ("hybrid", False, False, 0.0, 0, True, 10.0, 1.0, 300),
-    ("hybrid", False, True, 0.02, 0, True, 10.0, 1.0, 300),
-    ("spdconv", False, False, 0.0, 0, True, 10.0, 1.0, 300),
-
-    # --- GROUP C: THE "SOFT TOUCH" (Subtle Noise for Precision) ---
-    ("hybrid", False, True, 0.01, 0, False, 10.0, 1.0, 100),
-    ("hybrid", False, True, 0.02, 0, False, 10.0, 1.0, 100),
-    ("hybrid", False, True, 0.03, 0, False, 10.0, 1.0, 100),
-
-    # --- GROUP D: THE FUSION (Best of all worlds) ---
-    ("hybrid", False, True, 0.02, 0, True, 12.0, 1.5, 300),
-    ("hybrid", False, True, 0.01, 0, True, 15.0, 1.2, 300),
-    ("spdconv", False, True, 0.02, 0, True, 12.0, 1.0, 300),
-    
-    # --- GROUP E: DWT SECOND CHANCE (Longer training) ---
-    ("hybrid", True, False, 0.0, 0, True, 10.0, 1.0, 300),
+    # --- GROUP E: FINAL PROOF ---
     ("standard", False, True, 0.02, 0, False, 10.0, 1.0, 100),
-    ("standard", False, False, 0, 12.0, 1.5, 100),
+    ("standard", False, False, 0.0, 0, False, 12.0, 1.5, 100),
 ]
 
 def run_cmd(mode, dwt, aug, intensity, freeze, two_stage, box, cls, epochs):
