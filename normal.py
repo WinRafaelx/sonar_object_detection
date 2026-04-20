@@ -105,10 +105,13 @@ def run_experiment(args):
 
     # Dataset Setup
     base_data_dir = os.path.abspath('./data')
-    sss_dir = os.path.join(base_data_dir, 'sampled_yolo_dataset')
+    # This dataset unzips into 'Combined_Dataset'
+    sss_dir = os.path.join(base_data_dir, 'combined_data')
     
     if not os.path.exists(sss_dir):
-        kaggle.api.dataset_download_files('mawins/sample-sss-img', path=base_data_dir, unzip=True)
+        dataset_name = 'mawins/sonar-image'
+        print(f"Downloading new dataset: {dataset_name}...")
+        kaggle.api.dataset_download_files(dataset_name, path=base_data_dir, unzip=True)
     
     if use_dwt:
         sss_dir = setup_dwt_dataset(sss_dir)
@@ -118,7 +121,7 @@ def run_experiment(args):
 
     sss_yaml = patch_data_yaml(os.path.join(sss_dir, 'data.yaml'), sss_dir)
     model_yaml_path = f"tmp_{mode}.yaml"
-    pretrained_weights = "yolo11n.pt"
+    pretrained_weights = "yolo11m.pt"
     
     with open(sss_yaml, 'r') as f:
         nc = yaml.safe_load(f)['nc']
