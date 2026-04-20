@@ -158,7 +158,7 @@ backbone:
   - [-1, 2, C3k2, [128, False]]        # 2
   - [-1, 1, SonarSPDConv, [512]]       # 3-P3/8
   - [-1, 2, C3k2, [256, False]]        # 4
-  - [-1, 1, EMA, [256]]                # 5-Attention on P3
+  - [-1, 1, EMA, [32]]                 # 5-Attention on P3 (Fixed Factor)
   - [-1, 1, Conv, [512, 3, 2]]         # 6-P4/16
   - [-1, 2, C3k2, [512, True]]         # 7
   - [-1, 1, Conv, [1024, 3, 2]]        # 8-P5/32
@@ -186,7 +186,7 @@ head:
 # --- 5. EXECUTION ---
 def run_marathon(args):
     print("="*60)
-    print("SONAR OBJECT DETECTION: GOLDEN COMBINATION V3 (BiFPN+EMA)")
+    print("SONAR OBJECT DETECTION: GOLDEN COMBINATION V3.1 (UNFROZEN)")
     print(f"Epochs: {args.epochs}, Batch: {args.batch}, Imgsz: {args.imgsz}")
     print("="*60)
     
@@ -212,7 +212,6 @@ def run_marathon(args):
     with open('best_hyperparameters.yaml', 'r') as f:
         hyp = yaml.safe_load(f)
     
-    # Balanced for Sonar: prioritize classification over precise box alignment
     hyp['box'] = args.box if args.box is not None else 6.5
     hyp['cls'] = args.cls if args.cls is not None else 1.2
     
@@ -221,30 +220,18 @@ def run_marathon(args):
     with open(model_yaml, "w") as f:
         f.write(f"nc: {nc}\n" + CHAMPION_YAML)
     
+    # Load pretrained weights where possible
     model = YOLO(model_yaml).load("yolo11m.pt")
     
-    # 4. Two-Stage Marathon
-    project_dir = os.path.abspath("runs/champion_v3")
+    # 4. Single-Stage High-Patience Marathon
+    # Removed two-stage freezing as the architecture is too different for partial freezing
+    project_dir = os.path.abspath("runs/champion_v3_1")
     
-    # Calculate stage splits (10% for backbone stabilization, 90% for full tuning)
-    stage1_epochs = max(1, args.epochs // 10)
-    stage2_epochs = args.epochs - stage1_epochs
-    
-    print(f"\n>>> STAGE 1: BACKBONE STABILIZATION ({stage1_epochs} Epochs, Frozen)...")
+    print(f"\n>>> STARTING FULL MARATHON ({args.epochs} Epochs, Unfrozen)...")
     model.train(
-        data=sss_yaml_path, imgsz=args.imgsz, epochs=stage1_epochs, batch=args.batch,
-        freeze=10, project=project_dir, name="stage1", exist_ok=True, **hyp
-    )
-    
-    print(f"\n>>> STAGE 2: FULL ARCHITECTURE TUNING ({stage2_epochs} Epochs, Unfrozen)...")
-    best_weights = os.path.join(project_dir, "stage1", "weights", "best.pt")
-    if not os.path.exists(best_weights):
-        best_weights = os.path.join(project_dir, "stage1", "weights", "last.pt")
-        
-    model = YOLO(best_weights)
-    model.train(
-        data=sss_yaml_path, imgsz=args.imgsz, epochs=stage2_epochs, batch=args.batch,
-        freeze=0, project=project_dir, name="final_champion", exist_ok=True, **hyp
+        data=sss_yaml_path, imgsz=args.imgsz, epochs=args.epochs, batch=args.batch,
+        freeze=0, project=project_dir, name="final_champion", exist_ok=True, 
+        patience=100, **hyp
     )
     
     print("\n" + "!"*60)
