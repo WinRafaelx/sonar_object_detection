@@ -35,6 +35,27 @@ class SonarSPDConv(nn.Module):
         x1 = x[..., ::2, ::2]; x2 = x[..., 1::2, ::2]; x3 = x[..., ::2, 1::2]; x4 = x[..., 1::2, 1::2]
         return self.conv(torch.cat([x1, x2, x3, x4], dim=1))
 
+class CoordAtt(nn.Module):
+    def __init__(self, inp, oup, n=1, reduction=32):
+        super(CoordAtt, self).__init__()
+        self.pool_h = nn.AdaptiveAvgPool2d((None, 1))
+        self.pool_w = nn.AdaptiveAvgPool2d((1, None))
+        mip = max(8, inp // reduction)
+        self.conv1 = nn.Conv2d(inp, mip, kernel_size=1, stride=1, padding=0)
+        self.bn1 = nn.BatchNorm2d(mip)
+        self.act = nn.SiLU()
+        self.conv_h = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+        self.conv_w = nn.Conv2d(mip, oup, kernel_size=1, stride=1, padding=0)
+    def forward(self, x):
+        n, c, h, w = x.size()
+        x_h = self.pool_h(x)
+        x_w = self.pool_w(x).permute(0, 1, 3, 2)
+        y = torch.cat([x_h, x_w], dim=2)
+        y = self.act(self.bn1(self.conv1(y)))
+        x_h, x_w = torch.split(y, [h, w], dim=2)
+        x_w = x_w.permute(0, 1, 3, 2)
+        return x * self.conv_h(x_h).sigmoid() * self.conv_w(x_w).sigmoid()
+
 class CBAM(nn.Module):
     def __init__(self, c1, c2=None, reduction=16, k=1, s=1, p=None, g=1, d=1, act=True):
         super().__init__()
@@ -50,29 +71,84 @@ class CBAM(nn.Module):
         x = x * self.sa(res)
         return self.bn(self.proj(x))
 
+class EMA(nn.Module):
+    def __init__(self, channels, factor=32):
+        super(EMA, self).__init__()
+        self.groups = factor
+        self.conv1x1 = nn.Conv2d(channels // self.groups, channels // self.groups, kernel_size=1)
+        self.conv3x3 = nn.Conv2d(channels // self.groups, channels // self.groups, kernel_size=3, padding=1)
+        self.sig = nn.Sigmoid() 
+    def forward(self, x):
+        b, c, h, w = x.size()
+        group_x = x.view(b * self.groups, -1, h, w) 
+        x1 = self.conv1x1(nn.AdaptiveAvgPool2d(1)(group_x))
+        x2 = self.conv3x3(group_x)
+        out = self.sig(x1 * x2)
+        return (out * group_x).view(b, c, h, w)
+
+class BiFPN_Concat2(nn.Module):
+    def __init__(self, c1, c2):
+        super(BiFPN_Concat2, self).__init__()
+        self.w = nn.Parameter(torch.ones(len(c1), dtype=torch.float32), requires_grad=True)
+        self.epsilon = 0.0001
+        self.projections = nn.ModuleList([
+            nn.Conv2d(ch_in, c2, kernel_size=1, stride=1, padding=0) if ch_in != c2 else nn.Identity()
+            for ch_in in c1
+        ])
+    def forward(self, x):
+        w = F.relu(self.w)
+        w = w / (torch.sum(w, dim=0) + self.epsilon)
+        x_proj = [proj(feat) for proj, feat in zip(self.projections, x)]
+        return (w.view(-1, 1, 1, 1, 1) * torch.stack(x_proj)).sum(dim=0)
+
 # --- 3. MONKEY-PATCHING ---
 def patch_yolo_parser():
     setattr(tasks, 'SonarSPDConv', SonarSPDConv)
+    setattr(tasks, 'CoordAtt', CoordAtt)
     setattr(tasks, 'CBAM', CBAM)
+    setattr(tasks, 'EMA', EMA)
+    setattr(tasks, 'BiFPN_Concat2', BiFPN_Concat2)
     try:
         source = inspect.getsource(tasks.parse_model)
         if "SonarSPDConv" not in source:
-            for anchor in ["SPDConv,", "C2fCIB,", "C2f,", "Conv,"]:
-                if anchor in source:
-                    source = source.replace(anchor, f"{anchor} SonarSPDConv, CBAM,", 2)
-                    break
+            # 1. Patch BiFPN Concat branch
+            concat_branch = "elif m is Concat:\n            c2 = sum(ch[x] for x in f)"
+            if concat_branch in source:
+                bifpn_branch = concat_branch + "\n        elif m is BiFPN_Concat2:\n            c2 = args[0]\n            if c2 != nc:\n                c2 = make_divisible(min(c2, max_channels) * width, 8)\n            args = [[ch[x] for x in f], c2]"
+                source = source.replace(concat_branch, bifpn_branch)
+
+            # 2. Patch custom modules with specific logic
+            # We inject our specific handlers BEFORE the generic 'else' branch
+            else_branch = "else:\n            c2 = ch[f]"
+            custom_branch = """elif m is SonarSPDConv:
+            c1, c2 = ch[f], args[0]
+            if c2 != nc:
+                c2 = make_divisible(min(c2, max_channels) * width, 8)
+            args = [c1, c2, *args[1:]]
+        elif m in {CoordAtt, CBAM, EMA}:
+            c2 = ch[f]
+            args = [c2, *args]
+        """ + else_branch
+            
+            if else_branch in source:
+                source = source.replace(else_branch, custom_branch)
+
             exec_globals = tasks.__dict__.copy()
-            exec_globals.update({'SonarSPDConv': SonarSPDConv, 'CBAM': CBAM, 'torch': torch, 'nn': nn, 
-                                 'inspect': inspect, 'ast': __import__('ast'), 'contextlib': contextlib})
+            exec_globals.update({
+                'SonarSPDConv': SonarSPDConv, 'CoordAtt': CoordAtt, 'CBAM': CBAM, 
+                'EMA': EMA, 'BiFPN_Concat2': BiFPN_Concat2, 'torch': torch, 'nn': nn, 
+                'inspect': inspect, 'ast': __import__('ast'), 'contextlib': contextlib,
+                'make_divisible': make_divisible
+            })
             exec(source, exec_globals)
             tasks.parse_model = exec_globals['parse_model']
-            print("✓ Successfully patched YOLO model parser.")
+            print("✓ Successfully patched YOLO model parser with explicit custom module logic.")
     except Exception as e:
         print(f"⚠ Warning: Could not patch model parser: {e}")
 
 patch_yolo_parser()
 
-# --- 4. CHAMPION ARCHITECTURE ---
+# --- 4. CHAMPION ARCHITECTURE (BiFPN + EMA + 4-Scale) ---
 CHAMPION_YAML = """
 scales:
   m: [0.50, 1.00, 512] 
@@ -82,36 +158,40 @@ backbone:
   - [-1, 2, C3k2, [128, False]]        # 2
   - [-1, 1, SonarSPDConv, [512]]       # 3-P3/8
   - [-1, 2, C3k2, [256, False]]        # 4
-  - [-1, 1, Conv, [512, 3, 2]]         # 5-P4/16
-  - [-1, 2, C3k2, [512, True]]         # 6
-  - [-1, 1, Conv, [1024, 3, 2]]        # 7-P5/32
-  - [-1, 2, C3k2, [1024, True]]        # 8
-  - [-1, 1, SPPF, [1024, 5]]           # 9
+  - [-1, 1, EMA, [256]]                # 5-Attention on P3
+  - [-1, 1, Conv, [512, 3, 2]]         # 6-P4/16
+  - [-1, 2, C3k2, [512, True]]         # 7
+  - [-1, 1, Conv, [1024, 3, 2]]        # 8-P5/32
+  - [-1, 2, C3k2, [1024, True]]        # 9
+  - [-1, 1, SPPF, [1024, 5]]           # 10
 head:
-  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 10
-  - [[-1, 6], 1, Concat, [1]]  # 11
-  - [-1, 2, C3k2, [512, False]] # 12
-  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 13
-  - [[-1, 4], 1, Concat, [1]]  # 14
-  - [-1, 2, C3k2, [256, False]] # 15
-  - [-1, 1, Conv, [256, 3, 2]] # 16
-  - [[-1, 12], 1, Concat, [1]] # 17
-  - [-1, 2, C3k2, [512, False]] # 18
-  - [-1, 1, Conv, [512, 3, 2]] # 19
-  - [[-1, 9], 1, Concat, [1]]  # 20
-  - [-1, 2, C3k2, [1024, True]] # 21
-  - [[15, 18, 21], 1, Detect, [nc]] # 22
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 11 (P4)
+  - [[-1, 7], 1, BiFPN_Concat2, [512]]  # 12-BiFPN Fusion
+  - [-1, 2, C3k2, [512, False]]        # 13
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 14 (P3)
+  - [[-1, 5], 1, BiFPN_Concat2, [256]]  # 15-BiFPN Fusion
+  - [-1, 2, C3k2, [256, False]]        # 16
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']] # 17 (P2)
+  - [[-1, 2], 1, BiFPN_Concat2, [128]]  # 18-BiFPN Fusion
+  - [-1, 2, C3k2, [128, False]]        # 19
+
+  - [-1, 1, CoordAtt, [128, 128]]      # 20
+  
+  # Detect at 4 scales: P2, P3, P4, P5
+  - [[20, 16, 13, 10], 1, Detect, [nc]] # 21
 """
 
 # --- 5. EXECUTION ---
-def main():
+def run_marathon(args):
     print("="*60)
-    print("SONAR OBJECT DETECTION: GOLDEN COMBINATION MARATHON")
+    print("SONAR OBJECT DETECTION: GOLDEN COMBINATION V3 (BiFPN+EMA)")
+    print(f"Epochs: {args.epochs}, Batch: {args.batch}, Imgsz: {args.imgsz}")
     print("="*60)
     
     # 1. Dataset Setup
     base_data_dir = os.path.abspath('./data')
-    # This dataset unzips into 'Combined_Dataset'
     sss_dir = os.path.join(base_data_dir, 'combined_data')
     
     if not os.path.exists(sss_dir):
@@ -131,7 +211,10 @@ def main():
     # 2. Hyperparams
     with open('best_hyperparameters.yaml', 'r') as f:
         hyp = yaml.safe_load(f)
-    hyp['box'] = 10.0  # Recall-optimized gain
+    
+    # Balanced for Sonar: prioritize classification over precise box alignment
+    hyp['box'] = args.box if args.box is not None else 6.5
+    hyp['cls'] = args.cls if args.cls is not None else 1.2
     
     # 3. Build Champion Model
     model_yaml = "tmp_champion.yaml"
@@ -141,19 +224,26 @@ def main():
     model = YOLO(model_yaml).load("yolo11m.pt")
     
     # 4. Two-Stage Marathon
-    project_dir = os.path.abspath("runs/champion")
+    project_dir = os.path.abspath("runs/champion_v3")
     
-    print("\n>>> STAGE 1: BACKBONE STABILIZATION (50 Epochs, Frozen)...")
+    # Calculate stage splits (10% for backbone stabilization, 90% for full tuning)
+    stage1_epochs = max(1, args.epochs // 10)
+    stage2_epochs = args.epochs - stage1_epochs
+    
+    print(f"\n>>> STAGE 1: BACKBONE STABILIZATION ({stage1_epochs} Epochs, Frozen)...")
     model.train(
-        data=sss_yaml_path, imgsz=640, epochs=50, batch=16,
+        data=sss_yaml_path, imgsz=args.imgsz, epochs=stage1_epochs, batch=args.batch,
         freeze=10, project=project_dir, name="stage1", exist_ok=True, **hyp
     )
     
-    print("\n>>> STAGE 2: THE 450-EPOCH HYPER-MARATHON (Unfrozen)...")
+    print(f"\n>>> STAGE 2: FULL ARCHITECTURE TUNING ({stage2_epochs} Epochs, Unfrozen)...")
     best_weights = os.path.join(project_dir, "stage1", "weights", "best.pt")
+    if not os.path.exists(best_weights):
+        best_weights = os.path.join(project_dir, "stage1", "weights", "last.pt")
+        
     model = YOLO(best_weights)
     model.train(
-        data=sss_yaml_path, imgsz=640, epochs=450, batch=16,
+        data=sss_yaml_path, imgsz=args.imgsz, epochs=stage2_epochs, batch=args.batch,
         freeze=0, project=project_dir, name="final_champion", exist_ok=True, **hyp
     )
     
@@ -163,4 +253,12 @@ def main():
     print("!"*60)
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--epochs", type=int, default=500)
+    parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--imgsz", type=int, default=640)
+    parser.add_argument("--box", type=float)
+    parser.add_argument("--cls", type=float)
+    
+    args = parser.parse_args()
+    run_marathon(args)
