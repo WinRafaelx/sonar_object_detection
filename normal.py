@@ -149,7 +149,8 @@ def run_experiment(args):
         # Use absolute path for project to ensure predictable location
         model.train(
             data=sss_yaml, imgsz=args.imgsz, epochs=stage1_epochs, batch=args.batch,
-            freeze=10, project=project_dir, name=exp_name, exist_ok=True, **best_hyp
+            freeze=10, project=project_dir, name=exp_name, exist_ok=True, 
+            patience=args.patience, device=args.device, **best_hyp
         )
         
         print(">>> Stage 1 Complete. Searching for weights...")
@@ -174,12 +175,14 @@ def run_experiment(args):
         print(f">>> Stage 2: Unfreezing and Finishing ({stage2_epochs} Epochs)...")
         results = model.train(
             data=sss_yaml, imgsz=args.imgsz, epochs=stage2_epochs, batch=args.batch,
-            freeze=0, project=project_dir, name=exp_name + "_final", exist_ok=True, **best_hyp
+            freeze=0, project=project_dir, name=exp_name + "_final", exist_ok=True, 
+            patience=args.patience, device=args.device, **best_hyp
         )
     else:
         results = model.train(
             data=sss_yaml, imgsz=args.imgsz, epochs=args.epochs, batch=args.batch,
-            freeze=args.freeze, project=project_dir, name=exp_name, exist_ok=True, **best_hyp
+            freeze=args.freeze, project=project_dir, name=exp_name, exist_ok=True, 
+            patience=args.patience, device=args.device, **best_hyp
         )
     
     metrics = get_metrics(results)
@@ -198,7 +201,7 @@ if __name__ == "__main__":
     parser.add_argument("--two_stage", action="store_true")
     parser.add_argument("--box", type=float)
     parser.add_argument("--cls", type=float)
-    parser.add_argument("--epochs", type=int, default=100)
+    parser.add_argument("--epochs", type=int, default=500)
     parser.add_argument("--batch", type=int, default=default_batch_size)
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--patience", type=int, default=50)

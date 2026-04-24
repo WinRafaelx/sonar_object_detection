@@ -5,6 +5,7 @@ import torch.nn as nn
 import yaml
 import inspect
 import contextlib
+import argparse
 from dotenv import load_dotenv
 from ultralytics import YOLO
 import ultralytics.nn.tasks as tasks
@@ -77,27 +78,23 @@ def patch_data_yaml(yaml_path, dataset_dir):
         yaml.dump(data, f)
     return os.path.abspath(yaml_path)
 
-def train_sonar():
+def train_sonar(args):
     # 1. Dataset Setup (Same as normal.py)
     base_data_dir = os.path.abspath('./data')
-    # This dataset typically unzips into a folder
     sss_dir = os.path.join(base_data_dir, 'combined_data')
     
     if not os.path.exists(sss_dir):
         os.makedirs(base_data_dir, exist_ok=True)
-        dataset_name = 'mawins/sonar-image'
+        dataset_name = 'mawins/sss-img'
         print(f"Downloading new dataset: {dataset_name}...")
         kaggle.api.dataset_download_files(dataset_name, path=base_data_dir, unzip=True)
         
-        # Check for potential folder name variations after unzip
         downloaded_folders = [d for d in os.listdir(base_data_dir) if os.path.isdir(os.path.join(base_data_dir, d))]
         if 'Combined_Dataset' in downloaded_folders and not os.path.exists(sss_dir):
             os.rename(os.path.join(base_data_dir, 'Combined_Dataset'), sss_dir)
         elif 'sonar-image' in downloaded_folders and not os.path.exists(sss_dir):
             os.rename(os.path.join(base_data_dir, 'sonar-image'), sss_dir)
         elif not os.path.exists(sss_dir) and downloaded_folders:
-            # If there's only one folder and it's not what we expect, maybe use it?
-            # But let's stick to the folder containing data.yaml
             for folder in downloaded_folders:
                 if os.path.exists(os.path.join(base_data_dir, folder, 'data.yaml')):
                     os.rename(os.path.join(base_data_dir, folder), sss_dir)
@@ -109,21 +106,19 @@ def train_sonar():
 
     sss_yaml = patch_data_yaml(data_yaml_path, sss_dir)
 
-    # 2. Initialize the model from your custom YAML structure
-    # Note: Using the YAML requires nc to match the dataset if it's explicitly defined there.
-    # YOLO usually overrides this during training.
+    # 2. Initialize the model
     model_yaml = os.path.join(os.path.dirname(__file__), "yolo11-sonar.yaml")
     model = YOLO(model_yaml)
-
-    # 3. Load weights from standard YOLO11
     model.load("yolo11m.pt") 
 
-    # 4. Start Training
+    # 3. Start Training
     model.train(
         data=sss_yaml,
         imgsz=640,
-        epochs=500,
-        batch=default_batch_size,
+        epochs=args.epochs,
+        batch=args.batch,
+        patience=50,
+        device=args.device,
         project="runs/train",
         name="yolo11m_sonar", 
         verbose=True,
@@ -131,4 +126,9 @@ def train_sonar():
     )
 
 if __name__ == "__main__":
-    train_sonar()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--epochs", type=int, default=500)
+    parser.add_argument("--batch", type=int, default=default_batch_size)
+    parser.add_argument("--device", type=str, default="0")
+    args = parser.parse_args()
+    train_sonar(args)

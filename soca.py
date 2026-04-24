@@ -162,22 +162,36 @@ head:
 
 # --- 4. EXECUTION ---
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--epochs", type=int, default=500)
+    parser.add_argument("--batch", type=int, default=batch_size)
+    parser.add_argument("--device", type=str, default=None)
+    args = parser.parse_args()
+
     print("="*60)
     print("SOCA-YOLO TRAINING SYSTEM")
     print("="*60)
-    print(f"PyTorch version: {torch.__version__}")
-    print(f"CUDA available: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        device = 0
-        print(f"✓ Training on GPU: {torch.cuda.get_device_name(0)}")
+    
+    if args.device is not None:
+        device = args.device
+        print(f"✓ Using specified device: {device}")
     else:
-        device = 'cpu'
-        print("⚠ Training on CPU - this will be VERY slow!")
+        print(f"PyTorch version: {torch.__version__}")
+        print(f"CUDA available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            device = 0
+            print(f"✓ Training on GPU: {torch.cuda.get_device_name(0)}")
+        else:
+            device = 'cpu'
+            print("⚠ Training on CPU - this will be VERY slow!")
     print("="*60 + "\n")
     
     # Kaggle Download
-    dataset_path = './data/Combined_Dataset'
-    if not os.path.exists(os.path.join(dataset_path, "data.yaml")):
+    base_data_dir = os.path.abspath('./data')
+    sss_dir = os.path.join(base_data_dir, 'combined_data')
+    
+    if not os.path.exists(sss_dir):
         if not kaggle_creds_found:
             print("⚠ ERROR: Kaggle credentials not found! Place 'kaggle.json' in ~/.kaggle/ or set KAGGLE_USERNAME and KAGGLE_KEY.")
             sys.exit(1)
@@ -185,10 +199,21 @@ def main():
         print("\nDownloading dataset from Kaggle...")
         try:
             kaggle.api.dataset_download_files(
-                'paweekorns/sss-images',
-                path='./data',
+                'mawins/sss-img',
+                path=base_data_dir,
                 unzip=True
             )
+            # Check for potential folder name variations after unzip
+            downloaded_folders = [d for d in os.listdir(base_data_dir) if os.path.isdir(os.path.join(base_data_dir, d))]
+            if 'Combined_Dataset' in downloaded_folders and not os.path.exists(sss_dir):
+                os.rename(os.path.join(base_data_dir, 'Combined_Dataset'), sss_dir)
+            elif 'sonar-image' in downloaded_folders and not os.path.exists(sss_dir):
+                os.rename(os.path.join(base_data_dir, 'sonar-image'), sss_dir)
+            elif not os.path.exists(sss_dir) and downloaded_folders:
+                for folder in downloaded_folders:
+                    if os.path.exists(os.path.join(base_data_dir, folder, 'data.yaml')):
+                        os.rename(os.path.join(base_data_dir, folder), sss_dir)
+                        break
             print("✓ Download complete!")
         except Exception as e:
             print(f"⚠ Kaggle download failed: {e}")
@@ -196,14 +221,14 @@ def main():
     else:
         print("✓ Dataset found locally, skipping download.")
 
-    data_yaml = os.path.join(dataset_path, "data.yaml")
+    data_yaml = os.path.join(sss_dir, "data.yaml")
 
     # Patch the data.yaml with absolute paths to ensure YOLO finds the images
     with open(data_yaml, 'r') as f:
         yaml_data = yaml.safe_load(f)
     
     nc = yaml_data.get("nc", 4) # Extract nc from dataset
-    yaml_data['path'] = os.path.abspath(dataset_path)
+    yaml_data['path'] = os.path.abspath(sss_dir)
     
     with open(data_yaml, 'w') as f:
         yaml.dump(yaml_data, f)
@@ -213,14 +238,14 @@ def main():
     with open(yaml_path, "w") as f:
         f.write(f"nc: {nc}\n" + SOCA_YOLO11M_YAML)
     
-    print(f"✓ Dataset prepared at: {dataset_path} with nc={nc}\n")
+    print(f"✓ Dataset prepared at: {sss_dir} with nc={nc}\n")
 
     # Shared training parameters
     train_args = {
         'data': data_yaml,
         'imgsz': 640,
-        'epochs': 500,
-        'batch': batch_size,
+        'epochs': args.epochs,
+        'batch': args.batch,
         'device': device,
         'project': "runs/train",
         'rect': True,

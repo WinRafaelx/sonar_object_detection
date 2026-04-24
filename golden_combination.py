@@ -195,9 +195,20 @@ def run_marathon(args):
     sss_dir = os.path.join(base_data_dir, 'combined_data')
     
     if not os.path.exists(sss_dir):
-        dataset_name = 'mawins/sonar-image'
+        dataset_name = 'mawins/sss-img'
         print(f"Downloading new dataset: {dataset_name}...")
         kaggle.api.dataset_download_files(dataset_name, path=base_data_dir, unzip=True)
+        # Check for potential folder name variations after unzip
+        downloaded_folders = [d for d in os.listdir(base_data_dir) if os.path.isdir(os.path.join(base_data_dir, d))]
+        if 'Combined_Dataset' in downloaded_folders and not os.path.exists(sss_dir):
+            os.rename(os.path.join(base_data_dir, 'Combined_Dataset'), sss_dir)
+        elif 'sonar-image' in downloaded_folders and not os.path.exists(sss_dir):
+            os.rename(os.path.join(base_data_dir, 'sonar-image'), sss_dir)
+        elif not os.path.exists(sss_dir) and downloaded_folders:
+            for folder in downloaded_folders:
+                if os.path.exists(os.path.join(base_data_dir, folder, 'data.yaml')):
+                    os.rename(os.path.join(base_data_dir, folder), sss_dir)
+                    break
     
     sss_yaml_path = os.path.join(sss_dir, 'data.yaml')
     with open(sss_yaml_path, 'r') as f:
@@ -231,7 +242,7 @@ def run_marathon(args):
     model.train(
         data=sss_yaml_path, imgsz=args.imgsz, epochs=args.epochs, batch=args.batch,
         freeze=0, project=project_dir, name="final_champion", exist_ok=True, 
-        patience=100, **hyp
+        patience=50, device=args.device, **hyp
     )
     
     print("\n" + "!"*60)
@@ -246,6 +257,7 @@ if __name__ == "__main__":
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--box", type=float)
     parser.add_argument("--cls", type=float)
+    parser.add_argument("--device", type=str, default="0")
     
     args = parser.parse_args()
     run_marathon(args)

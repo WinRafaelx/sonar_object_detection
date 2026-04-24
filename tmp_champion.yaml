@@ -8,7 +8,7 @@ backbone:
   - [-1, 2, C3k2, [128, False]]        # 2
   - [-1, 1, SonarSPDConv, [512]]       # 3-P3/8
   - [-1, 2, C3k2, [256, False]]        # 4
-  - [-1, 1, EMA, [256]]                # 5-Attention on P3
+  - [-1, 1, EMA, [32]]                 # 5-Attention on P3 (Fixed Factor)
   - [-1, 1, Conv, [512, 3, 2]]         # 6-P4/16
   - [-1, 2, C3k2, [512, True]]         # 7
   - [-1, 1, Conv, [1024, 3, 2]]        # 8-P5/32
