@@ -12,7 +12,7 @@ import ultralytics.nn.tasks as tasks
 
 # Import custom modules
 from custom_modules import SonarSPDConv, CoordAtt, CBAM, EMA, BiFPN_Concat2
-from constant import batch_size as default_batch_size
+from constant import batch_size as default_batch_size, DATASET_NAME
 
 # 1. LOAD ENV & KAGGLE AUTH
 load_dotenv()
@@ -85,7 +85,7 @@ def train_sonar(args):
     
     if not os.path.exists(sss_dir):
         os.makedirs(base_data_dir, exist_ok=True)
-        dataset_name = 'mawins/sss-img'
+        dataset_name = DATASET_NAME
         print(f"Downloading new dataset: {dataset_name}...")
         kaggle.api.dataset_download_files(dataset_name, path=base_data_dir, unzip=True)
         

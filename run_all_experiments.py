@@ -15,7 +15,7 @@ SCRIPTS = [
 
 def run_script(script_path, test_mode=False, device="0"):
     """Runs a single training script and handles failures."""
-    epochs = 1 if test_mode else 500
+    epochs = 5 if test_mode else 500
     batch = 16
     patience = 50
     

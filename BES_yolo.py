@@ -21,7 +21,7 @@ from ultralytics.nn.modules import *
 from ultralytics.utils.ops import make_divisible
 from ultralytics.utils import LOGGER, colorstr
 import ultralytics.nn.tasks as tasks
-from constant import batch_size
+from constant import batch_size, DATASET_NAME
 
 Upsample = nn.Upsample
 
@@ -281,7 +281,7 @@ def main():
         print("\nDownloading dataset from Kaggle...")
         try:
             kaggle.api.dataset_download_files(
-                'mawins/sss-img',
+                DATASET_NAME,
                 path=base_data_dir,
                 unzip=True
             )

@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from ultralytics import YOLO
 import ultralytics.nn.tasks as tasks
-from constant import batch_size
+from constant import batch_size, DATASET_NAME
 import inspect
 import yaml
 from dotenv import load_dotenv
@@ -199,7 +199,7 @@ def main():
         print("\nDownloading dataset from Kaggle...")
         try:
             kaggle.api.dataset_download_files(
-                'mawins/sss-img',
+                DATASET_NAME,
                 path=base_data_dir,
                 unzip=True
             )

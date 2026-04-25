@@ -8,7 +8,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from ultralytics import YOLO
 import ultralytics.nn.tasks as tasks
-from constant import batch_size as default_batch_size
+from constant import batch_size as default_batch_size, DATASET_NAME
 import argparse
 import contextlib
 import shutil
@@ -109,7 +109,7 @@ def run_experiment(args):
     sss_dir = os.path.join(base_data_dir, 'combined_data')
     
     if not os.path.exists(sss_dir):
-        dataset_name = 'mawins/sonar-image'
+        dataset_name = DATASET_NAME
         print(f"Downloading new dataset: {dataset_name}...")
         kaggle.api.dataset_download_files(dataset_name, path=base_data_dir, unzip=True)
     

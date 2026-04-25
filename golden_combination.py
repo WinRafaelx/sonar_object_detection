@@ -17,6 +17,7 @@ from ultralytics import YOLO
 import ultralytics.nn.tasks as tasks
 from ultralytics.utils.ops import make_divisible
 from ultralytics.utils import LOGGER, colorstr
+from constant import DATASET_NAME
 
 # 1. LOAD ENV & KAGGLE AUTH
 load_dotenv()
@@ -195,7 +196,7 @@ def run_marathon(args):
     sss_dir = os.path.join(base_data_dir, 'combined_data')
     
     if not os.path.exists(sss_dir):
-        dataset_name = 'mawins/sss-img'
+        dataset_name = DATASET_NAME
         print(f"Downloading new dataset: {dataset_name}...")
         kaggle.api.dataset_download_files(dataset_name, path=base_data_dir, unzip=True)
         # Check for potential folder name variations after unzip
