@@ -3,6 +3,7 @@ import sys
 import os
 import argparse
 import time
+from constant import batch_size, TEST_EPOCHS, PROD_EPOCHS
 
 # List of training scripts to run
 SCRIPTS = [
@@ -15,22 +16,18 @@ SCRIPTS = [
 
 def run_script(script_path, test_mode=False, device="0"):
     """Runs a single training script and handles failures."""
-    epochs = 5 if test_mode else 500
-    batch = 16
-    patience = 50
+    epochs = TEST_EPOCHS if test_mode else PROD_EPOCHS
     
-    cmd = [sys.executable, script_path]
+    cmd = [
+        sys.executable, script_path,
+        "--epochs", str(epochs),
+        "--batch", str(batch_size),
+        "--device", str(device)
+    ]
     
-    # Scripts that use argparse
-    if script_path in ["normal.py", "golden_combination.py"]:
-        cmd.extend(["--epochs", str(epochs), "--batch", str(batch), "--device", str(device)])
-        if script_path == "normal.py":
-            cmd.extend(["--patience", str(patience), "--mode", "standard"])
-    else:
-        # For scripts we'll update to support --device or that use train_args
-        cmd.extend(["--device", str(device)])
-        if test_mode:
-            cmd.extend(["--epochs", "1"])
+    # Extra flags for specific scripts if needed
+    if script_path == "normal.py":
+        cmd.extend(["--patience", "50", "--mode", "standard"])
 
     print(f"\n{'='*60}")
     print(f"STARTING: {script_path} ({'TEST' if test_mode else 'PROD'} | DEVICE: {device})")
